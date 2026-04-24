@@ -42,7 +42,7 @@ export const MissionHUD = ({ config, onChange, running, className }: Props) => {
       {/* Tree species */}
       <section>
         <Label>Tree species</Label>
-        <div className="grid grid-cols-3 gap-2 mt-2">
+        <div className="grid grid-cols-5 gap-1.5 mt-2">
           {(Object.keys(TREE_PROFILES) as TreeSpecies[]).map((s) => {
             const p = TREE_PROFILES[s];
             const active = config.species === s;
@@ -52,7 +52,7 @@ export const MissionHUD = ({ config, onChange, running, className }: Props) => {
                 onClick={() => set("species", s)}
                 disabled={running}
                 className={[
-                  "relative rounded-xl px-3 py-3 text-left transition-all duration-300 hover-lift",
+                  "relative rounded-lg px-1.5 py-2 text-center transition-all duration-300 hover-lift",
                   "border",
                   active
                     ? "border-primary/60 bg-primary/10 shadow-glow-soft"
@@ -60,10 +60,10 @@ export const MissionHUD = ({ config, onChange, running, className }: Props) => {
                   running && "opacity-60 cursor-not-allowed",
                 ].join(" ")}
                 aria-pressed={active}
+                title={`${p.label} · $${p.costPerTree}/tree`}
               >
-                <div className="text-2xl leading-none mb-1">{p.emoji}</div>
-                <div className="text-sm font-medium">{p.label}</div>
-                <div className="text-[10px] text-muted-foreground font-mono mt-0.5">${p.costPerTree}/tree</div>
+                <div className="text-xl leading-none">{p.emoji}</div>
+                <div className="text-[10px] font-medium mt-1 truncate">{p.label}</div>
               </button>
             );
           })}

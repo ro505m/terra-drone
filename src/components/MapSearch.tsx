@@ -19,6 +19,7 @@ interface Props {
   countryCodes?: string;
   onSelect: (r: GeocodeResult) => void;
   className?: string;
+  placeholder?: string;
 }
 
 /**
@@ -30,6 +31,7 @@ export const MapSearch = ({
   countryCodes = "iq",
   onSelect,
   className,
+  placeholder = "Search city, district, or street in Iraq…",
 }: Props) => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GeocodeResult[]>([]);
@@ -178,7 +180,7 @@ export const MapSearch = ({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKey}
           onFocus={() => results.length && setOpen(true)}
-          placeholder="Search city, district, or street in Iraq…"
+          placeholder={placeholder}
           className="bg-transparent outline-none text-sm flex-1 placeholder:text-muted-foreground min-w-0"
           aria-label="Search location"
         />

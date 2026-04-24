@@ -3,9 +3,16 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import * as turf from "@turf/turf";
 import { gsap } from "gsap";
-import { RotateCcw, Check, AlertTriangle, Lock } from "lucide-react";
-import type { MissionConfig } from "@/lib/pricing";
-import { TREE_PROFILES } from "@/lib/pricing";
+import { RotateCcw, Check, AlertTriangle, Lock, Flag, Sparkles, Pencil } from "lucide-react";
+import type { MissionConfig, TreeSpecies } from "@/lib/pricing";
+import {
+  PLANT_PROFILES,
+  suggestPlantByLatitude,
+  recommendDensity,
+  soilSuitability,
+  type PlantId,
+} from "@/lib/plants";
+import { spreadSeeds } from "@/lib/seedSpread";
 import provincesData from "@/data/iraq-provinces.json";
 import { MapSearch, type GeocodeResult } from "./MapSearch";
 
@@ -13,19 +20,22 @@ interface Props {
   config: MissionConfig;
   onAreaChange: (areaHa: number) => void;
   onMissionRun: (running: boolean) => void;
+  onPlantChange?: (plant: PlantId) => void;
 }
 
 type LngLat = [number, number];
 
-// ---- Strict UX constraints ----
-const MIN_POINTS = 4;
-const MAX_POINTS = 6;
-const MAX_AREA_KM2 = 5;          // hard cap (km²)
-const SOFT_AREA_KM2 = 2;         // suggested zone
-// Iraq bounding box (with a small breathing margin)
+// ---- UX constraints ----
+const MIN_AREA_M2 = 5_000;          // 0.5 ha minimum
+const MAX_AREA_KM2 = 5;             // hard cap
+const SOFT_AREA_KM2 = 2;            // suggested zone
+const SNAP_PIXEL_RADIUS = 14;       // snap-to-start in screen pixels
+const MIN_POINTS_TO_CLOSE = 3;
+const MAX_TREE_MARKERS = 600;       // perf cap on DOM markers
+
 const IRAQ_BOUNDS: maplibregl.LngLatBoundsLike = [
-  [38.0, 28.5],  // SW
-  [49.2, 37.9],  // NE
+  [38.0, 28.5],
+  [49.2, 37.9],
 ];
 
 const PROVINCES = provincesData as GeoJSON.FeatureCollection;
@@ -66,27 +76,37 @@ interface SearchPin {
   name: string;
 }
 
-export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => {
+interface LockedProvince {
+  id: string;
+  geom: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
+  bbox: [number, number, number, number]; // [w,s,e,n]
+  centroid: LngLat;
+}
+
+type Phase = "idle" | "drawing" | "closed" | "planted";
+
+export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChange }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
   const verticesRef = useRef<LngLat[]>([]);
-  const droneMarkersRef = useRef<maplibregl.Marker[]>([]);
   const treeMarkersRef = useRef<maplibregl.Marker[]>([]);
-  const animFrameRef = useRef<number | null>(null);
   const hoveredProvinceRef = useRef<string | null>(null);
-  const lockedProvinceRef = useRef<{ id: string; geom: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> } | null>(null);
+  const lockedRef = useRef<LockedProvince | null>(null);
   const searchPinRef = useRef<SearchPin | null>(null);
+  const phaseRef = useRef<Phase>("idle");
+  const shimmerRafRef = useRef<number | null>(null);
+  const cursorLngLatRef = useRef<LngLat | null>(null);
 
+  const [phase, setPhase] = useState<Phase>("idle");
   const [pointCount, setPointCount] = useState(0);
-  const [running, setRunning] = useState(false);
   const [areaKm2, setAreaKm2] = useState(0);
   const [areaError, setAreaError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
-  const [lockedProvinceName, setLockedProvinceName] = useState<string | null>(null);
-  const [hint, setHint] = useState<string>(
-    "Search a place or click a province to start"
-  );
+  const [lockedProvince, setLockedProvince] = useState<LockedProvince | null>(null);
+  const [snapHover, setSnapHover] = useState(false);
+  const [suggested, setSuggested] = useState<PlantId | null>(null);
+  const [suitability, setSuitability] = useState<number>(0);
+  const [hint, setHint] = useState<string>("Click a province to lock your planting region");
   const [tooltip, setTooltip] = useState<TooltipState>({
     visible: false, x: 0, y: 0, name: "", capital: "", popM: 0, areaKm2: 0,
   });
@@ -100,7 +120,6 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
       style: DARK_STYLE,
       center: [43.7, 33.2],
       zoom: 5.4,
-      // Strict: no rotation, no pitch — always north-up
       pitch: 0,
       bearing: 0,
       maxPitch: 0,
@@ -108,7 +127,6 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
       dragRotate: false,
       pitchWithRotate: false,
       touchZoomRotate: true,
-      // Pan limits
       maxBounds: IRAQ_BOUNDS,
       minZoom: 5,
       maxZoom: 16,
@@ -127,10 +145,7 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
         id: "atmosphere-glow",
         type: "fill",
         source: "provinces",
-        paint: {
-          "fill-color": "hsl(180, 70%, 50%)",
-          "fill-opacity": 0.04,
-        },
+        paint: { "fill-color": "hsl(180, 70%, 50%)", "fill-opacity": 0.04 },
       });
 
       map.addLayer({
@@ -146,7 +161,7 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
           ],
           "fill-opacity": [
             "case",
-            ["boolean", ["feature-state", "selected"], false], 0.16,
+            ["boolean", ["feature-state", "selected"], false], 0.18,
             ["boolean", ["feature-state", "hover"], false], 0.12,
             0.04,
           ],
@@ -194,75 +209,67 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
       // ---------- Drawing sources ----------
       map.addSource("vertices", { type: "geojson", data: turf.featureCollection([]) });
       map.addSource("path", { type: "geojson", data: turf.featureCollection([]) });
+      map.addSource("ghost", { type: "geojson", data: turf.featureCollection([]) }); // cursor preview line
       map.addSource("polygon", { type: "geojson", data: turf.featureCollection([]) });
-      map.addSource("droneTrail", { type: "geojson", data: turf.featureCollection([]) });
 
+      // Polygon fills (organic, layered for depth)
       map.addLayer({
         id: "polygon-glow-outer",
         type: "fill",
         source: "polygon",
-        paint: {
-          "fill-color": [
-            "case",
-            ["boolean", ["feature-state", "invalid"], false], "hsl(0, 80%, 60%)",
-            "hsl(142, 92%, 55%)",
-          ],
-          "fill-opacity": 0.08,
-        },
+        paint: { "fill-color": "hsl(142, 92%, 55%)", "fill-opacity": 0.10 },
       });
       map.addLayer({
         id: "polygon-glow-inner",
         type: "fill",
         source: "polygon",
-        paint: {
-          "fill-color": [
-            "case",
-            ["boolean", ["feature-state", "invalid"], false], "hsl(0, 90%, 65%)",
-            "hsl(142, 100%, 70%)",
-          ],
-          "fill-opacity": 0.18,
-        },
+        paint: { "fill-color": "hsl(142, 100%, 70%)", "fill-opacity": 0.18 },
+      });
+      // Shimmer pattern uses a tweened opacity layer to fake breathing texture.
+      map.addLayer({
+        id: "polygon-shimmer",
+        type: "fill",
+        source: "polygon",
+        paint: { "fill-color": "hsl(160, 100%, 75%)", "fill-opacity": 0.0 },
       });
       map.addLayer({
         id: "polygon-outline",
         type: "line",
         source: "polygon",
         paint: {
-          "line-color": [
-            "case",
-            ["boolean", ["feature-state", "invalid"], false], "hsl(0, 90%, 70%)",
-            "hsl(142, 100%, 70%)",
-          ],
-          "line-width": 2.2,
+          "line-color": "hsl(142, 100%, 70%)",
+          "line-width": 2.4,
           "line-blur": 1.4,
           "line-opacity": 1,
         },
       });
 
+      // Drawing path (committed segments)
       map.addLayer({
         id: "path-line",
         type: "line",
         source: "path",
         paint: {
           "line-color": "hsl(142, 92%, 65%)",
-          "line-width": 2,
-          "line-dasharray": [2, 2],
-          "line-opacity": 0.85,
+          "line-width": 2.2,
+          "line-opacity": 0.9,
         },
       });
 
+      // Ghost line from last vertex → cursor (preview)
       map.addLayer({
-        id: "drone-trail",
+        id: "ghost-line",
         type: "line",
-        source: "droneTrail",
+        source: "ghost",
         paint: {
-          "line-color": "hsl(180, 80%, 65%)",
-          "line-width": 1.4,
+          "line-color": "hsl(142, 92%, 65%)",
+          "line-width": 1.6,
           "line-opacity": 0.55,
-          "line-blur": 0.8,
+          "line-dasharray": [2, 2],
         },
       });
 
+      // Vertex pulse + core
       map.addLayer({
         id: "vertex-pulse",
         type: "circle",
@@ -279,8 +286,16 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
         type: "circle",
         source: "vertices",
         paint: {
-          "circle-radius": 5,
-          "circle-color": "hsl(142, 100%, 70%)",
+          "circle-radius": [
+            "case",
+            ["boolean", ["feature-state", "first"], false], 7,
+            5,
+          ],
+          "circle-color": [
+            "case",
+            ["boolean", ["feature-state", "first"], false], "hsl(160, 100%, 80%)",
+            "hsl(142, 100%, 70%)",
+          ],
           "circle-stroke-color": "hsl(220, 50%, 4%)",
           "circle-stroke-width": 2,
         },
@@ -310,7 +325,9 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
         popM: (f.properties?.popM as number) ?? 0,
         areaKm2: km2,
       });
-      map.getCanvas().style.cursor = running ? "wait" : "pointer";
+      // Cursor depends on phase
+      const ph = phaseRef.current;
+      map.getCanvas().style.cursor = ph === "drawing" ? "crosshair" : ph === "idle" ? "pointer" : "";
     });
 
     map.on("mouseleave", "province-fill", () => {
@@ -322,88 +339,144 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
       map.getCanvas().style.cursor = "";
     });
 
-    // ---------- Province click → cinematic flyTo (no pitch/bearing) ----------
+    // ---------- Province click → smooth zoom + lock ----------
     map.on("click", "province-fill", (e) => {
-      if (running) return;
-      // If a province is already locked, do not switch unless the user resets.
-      if (lockedProvinceRef.current) return;
-      // If user has already started drawing, do not steal the click.
+      if (lockedRef.current) return;
       if (verticesRef.current.length > 0) return;
 
       const f = e.features?.[0];
       if (!f) return;
       const name = f.properties?.name as string;
       const geom = f as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
-      const center = turf.centroid(geom).geometry.coordinates as LngLat;
+      const centroid = turf.centroid(geom).geometry.coordinates as LngLat;
+      const bbox = turf.bbox(geom) as [number, number, number, number];
 
-      // Lock to province
-      lockedProvinceRef.current = { id: name, geom };
-      setLockedProvinceName(name);
+      const locked: LockedProvince = { id: name, geom, bbox, centroid };
+      lockedRef.current = locked;
+      setLockedProvince(locked);
       map.setFeatureState({ source: "provinces", id: name }, { selected: true });
 
-      // Smooth zoom — north-up, flat
-      map.flyTo({
-        center,
-        zoom: 9,
-        pitch: 0,
-        bearing: 0,
-        speed: 0.7,
-        curve: 1.6,
-        easing: (t) => 1 - Math.pow(1 - t, 4),
-        essential: true,
-      });
+      // Suggest plant from latitude
+      const sug = suggestPlantByLatitude(centroid[1]);
+      setSuggested(sug);
+      const fit = soilSuitability(centroid[1], centroid[0], sug);
+      setSuitability(fit);
+      onPlantChange?.(sug);
 
-      setHint(`Locked to ${name} · click ${MIN_POINTS}–${MAX_POINTS} points to draw your planting area`);
+      map.fitBounds(
+        [
+          [bbox[0], bbox[1]],
+          [bbox[2], bbox[3]],
+        ],
+        {
+          padding: 80,
+          duration: 1400,
+          pitch: 0,
+          bearing: 0,
+          essential: true,
+          maxZoom: 10,
+          easing: (t) => 1 - Math.pow(1 - t, 4),
+        }
+      );
+
+      setHint(`${name} locked · search a place or click "Start drawing"`);
       e.preventDefault();
+    });
+
+    // ---------- Cursor tracking for ghost line + snap detection ----------
+    map.on("mousemove", (e) => {
+      cursorLngLatRef.current = [e.lngLat.lng, e.lngLat.lat];
+      if (phaseRef.current !== "drawing") {
+        if (snapHover) setSnapHover(false);
+        return;
+      }
+      const verts = verticesRef.current;
+      // Snap detection: distance to first vertex in screen pixels
+      let nowSnap = false;
+      if (verts.length >= MIN_POINTS_TO_CLOSE) {
+        const first = map.project({ lng: verts[0][0], lat: verts[0][1] });
+        const dx = first.x - e.point.x;
+        const dy = first.y - e.point.y;
+        if (Math.hypot(dx, dy) <= SNAP_PIXEL_RADIUS) nowSnap = true;
+      }
+      if (nowSnap !== snapHover) setSnapHover(nowSnap);
+
+      // Ghost preview line: last vertex → cursor (or → first if snapping)
+      if (verts.length >= 1) {
+        const target: LngLat = nowSnap ? verts[0] : [e.lngLat.lng, e.lngLat.lat];
+        const ghost = turf.lineString([verts[verts.length - 1], target]);
+        (map.getSource("ghost") as maplibregl.GeoJSONSource)?.setData(turf.featureCollection([ghost]));
+        map.getCanvas().style.cursor = nowSnap ? "pointer" : "crosshair";
+      }
     });
 
     // ---------- Vertex placement ----------
     map.on("click", (e) => {
-      if (running) return;
-      if (e.defaultPrevented) return; // province-flyTo consumed it
-      // Require a locked province before drawing
-      if (!lockedProvinceRef.current) {
-        setHint("Click a province first to lock your planting region");
-        return;
+      if (e.defaultPrevented) return; // province click consumed it
+      if (phaseRef.current !== "drawing") return;
+      if (!lockedRef.current) return;
+
+      const verts = verticesRef.current;
+
+      // Snap to close
+      if (verts.length >= MIN_POINTS_TO_CLOSE) {
+        const first = map.project({ lng: verts[0][0], lat: verts[0][1] });
+        const dx = first.x - e.point.x;
+        const dy = first.y - e.point.y;
+        if (Math.hypot(dx, dy) <= SNAP_PIXEL_RADIUS) {
+          finishArea();
+          return;
+        }
       }
-      if (confirmed) return;
 
       const lngLat: LngLat = [e.lngLat.lng, e.lngLat.lat];
 
-      // Constrain to the locked province polygon
-      if (!turf.booleanPointInPolygon(turf.point(lngLat), lockedProvinceRef.current.geom as turf.AllGeoJSON as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>)) {
-        setHint(`Click inside ${lockedProvinceRef.current.id} to place a vertex`);
+      // Constrain to locked province
+      if (!turf.booleanPointInPolygon(turf.point(lngLat), lockedRef.current.geom as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>)) {
+        setHint(`Click inside ${lockedRef.current.id} to place a vertex`);
         flashWarn();
         return;
       }
 
-      if (verticesRef.current.length >= MAX_POINTS) {
-        setHint(`Maximum ${MAX_POINTS} points reached · Confirm or Reset`);
-        return;
-      }
-
-      verticesRef.current = [...verticesRef.current, lngLat];
+      verticesRef.current = [...verts, lngLat];
       setPointCount(verticesRef.current.length);
       spawnRipple(map, lngLat);
       updateGeometry();
 
       const n = verticesRef.current.length;
-      if (n < MIN_POINTS) {
-        setHint(`${MIN_POINTS - n} more point${MIN_POINTS - n > 1 ? "s" : ""} needed`);
-      } else if (n < MAX_POINTS) {
-        setHint(`Polygon ready · add up to ${MAX_POINTS - n} more or Confirm area`);
+      if (n < MIN_POINTS_TO_CLOSE) {
+        setHint(`${MIN_POINTS_TO_CLOSE - n} more point${MIN_POINTS_TO_CLOSE - n > 1 ? "s" : ""} needed to close`);
       } else {
-        setHint(`Maximum ${MAX_POINTS} points reached · Confirm or Reset`);
+        setHint(`Click the first point to close · or "Finish Area"`);
       }
     });
 
     return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (shimmerRafRef.current) cancelAnimationFrame(shimmerRafRef.current);
       map.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep phaseRef in sync
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  // Mark first vertex with feature-state (visual emphasis when snap-ready)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    // Re-flag first vertex by re-emitting source data with ids
+    const verts = verticesRef.current;
+    if (!verts.length) return;
+    const fc = turf.featureCollection(
+      verts.map((v, i) => turf.point(v, {}, { id: i }))
+    );
+    (map.getSource("vertices") as maplibregl.GeoJSONSource)?.setData(fc);
+    if (verts.length >= MIN_POINTS_TO_CLOSE) {
+      map.setFeatureState({ source: "vertices", id: 0 }, { first: true });
+    }
+  }, [pointCount]);
 
   // ---------- Geometry & area validation ----------
   const updateGeometry = useCallback(() => {
@@ -412,18 +485,19 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
 
     const verts = verticesRef.current;
 
-    (map.getSource("vertices") as maplibregl.GeoJSONSource)?.setData(
-      turf.featureCollection(verts.map((v) => turf.point(v)))
-    );
+    // Vertices source (with ids so first can be highlighted)
+    const fc = turf.featureCollection(verts.map((v, i) => turf.point(v, {}, { id: i })));
+    (map.getSource("vertices") as maplibregl.GeoJSONSource)?.setData(fc);
 
+    // Committed line through points (no auto-close while drawing)
     if (verts.length >= 2) {
-      // Progressive line draw via GSAP — animate dashOffset feel by tweening line length
       const line = turf.lineString(verts);
       (map.getSource("path") as maplibregl.GeoJSONSource)?.setData(turf.featureCollection([line]));
     } else {
       (map.getSource("path") as maplibregl.GeoJSONSource)?.setData(turf.featureCollection([]));
     }
 
+    // Live polygon preview while drawing (≥3 points)
     if (verts.length >= 3) {
       const ring = [...verts, verts[0]];
       const poly = turf.polygon([ring]);
@@ -433,23 +507,24 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
       const km2 = m2 / 1_000_000;
       setAreaKm2(km2);
 
-      const invalid = km2 > MAX_AREA_KM2;
-      // Toggle invalid feature-state on the polygon source's single feature
-      // (we use a synthetic id 'planting' via promoteId-less source — instead recolor via paint condition based on area)
-      // Simpler: switch paint property dynamically:
-      map.setPaintProperty("polygon-glow-inner", "fill-color",
-        invalid ? "hsl(0, 90%, 65%)" : "hsl(142, 100%, 70%)");
-      map.setPaintProperty("polygon-glow-outer", "fill-color",
-        invalid ? "hsl(0, 80%, 60%)" : "hsl(142, 92%, 55%)");
-      map.setPaintProperty("polygon-outline", "line-color",
-        invalid ? "hsl(0, 90%, 70%)" : "hsl(142, 100%, 70%)");
+      const tooBig = km2 > MAX_AREA_KM2;
+      const tooSmall = m2 < MIN_AREA_M2;
 
-      if (invalid) {
-        setAreaError(`Area exceeds ${MAX_AREA_KM2} km² limit (${km2.toFixed(2)} km²) — adjust your polygon`);
-        onAreaChange(0); // do not surface invalid area to pricing
+      const invalidColor = tooBig ? "hsl(0, 90%, 65%)" : "hsl(45, 100%, 65%)";
+      const okColor = "hsl(142, 100%, 70%)";
+
+      if (tooBig) {
+        setAreaError(`Area exceeds ${MAX_AREA_KM2} km² limit (${km2.toFixed(2)} km²)`);
+        applyPolyColors(map, "hsl(0, 80%, 60%)", invalidColor, "hsl(0, 90%, 70%)");
+        onAreaChange(0);
+      } else if (tooSmall) {
+        setAreaError(`Area below ${(MIN_AREA_M2 / 10_000).toFixed(2)} ha minimum`);
+        applyPolyColors(map, "hsl(45, 90%, 55%)", invalidColor, "hsl(45, 100%, 70%)");
+        onAreaChange(0);
       } else {
         setAreaError(null);
-        onAreaChange(Math.max(0.01, m2 / 10_000)); // hectares
+        applyPolyColors(map, "hsl(142, 92%, 55%)", okColor, "hsl(142, 100%, 70%)");
+        onAreaChange(Math.max(0.01, m2 / 10_000));
       }
     } else {
       (map.getSource("polygon") as maplibregl.GeoJSONSource)?.setData(turf.featureCollection([]));
@@ -458,6 +533,139 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
       onAreaChange(0);
     }
   }, [onAreaChange]);
+
+  // ---------- Phase actions ----------
+  const startDrawing = () => {
+    if (!lockedRef.current) {
+      setHint("Click a province first to lock your planting region");
+      flashWarn();
+      return;
+    }
+    setPhase("drawing");
+    setHint(`Click to drop points inside ${lockedRef.current.id} · close on first point or "Finish"`);
+    const map = mapRef.current;
+    if (map) map.getCanvas().style.cursor = "crosshair";
+  };
+
+  const finishArea = () => {
+    const verts = verticesRef.current;
+    if (verts.length < MIN_POINTS_TO_CLOSE) {
+      setHint(`Need at least ${MIN_POINTS_TO_CLOSE} points to close`);
+      flashWarn();
+      return;
+    }
+    if (areaError) {
+      flashWarn();
+      return;
+    }
+    setPhase("closed");
+    setSnapHover(false);
+    const map = mapRef.current;
+    if (map) {
+      map.getCanvas().style.cursor = "";
+      // Clear ghost
+      (map.getSource("ghost") as maplibregl.GeoJSONSource)?.setData(turf.featureCollection([]));
+      // Cinematic emphasis pulse
+      gsap.fromTo(
+        { v: 0.34 },
+        { v: 0.34 },
+        {
+          v: 0.20,
+          duration: 0.9,
+          ease: "expo.out",
+          onUpdate: function () {
+            const o = (this.targets()[0] as { v: number }).v;
+            map.setPaintProperty("polygon-glow-inner", "fill-opacity", o);
+          },
+        }
+      );
+      // Start shimmer loop
+      startShimmer();
+    }
+    setHint(`Area ready · ${areaKm2.toFixed(2)} km² · choose a plant and Confirm Planting`);
+  };
+
+  const startShimmer = () => {
+    if (shimmerRafRef.current) cancelAnimationFrame(shimmerRafRef.current);
+    const map = mapRef.current;
+    if (!map) return;
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const dt = (t - t0) / 1000;
+      // Two overlapping sine waves for organic breathing
+      const o = 0.04 + 0.06 * (0.5 + 0.5 * Math.sin(dt * 1.3))
+                    + 0.04 * (0.5 + 0.5 * Math.sin(dt * 0.7 + 1.7));
+      try {
+        map.setPaintProperty("polygon-shimmer", "fill-opacity", o);
+      } catch { /* style might be tearing down */ }
+      shimmerRafRef.current = requestAnimationFrame(tick);
+    };
+    shimmerRafRef.current = requestAnimationFrame(tick);
+  };
+
+  const stopShimmer = () => {
+    if (shimmerRafRef.current) {
+      cancelAnimationFrame(shimmerRafRef.current);
+      shimmerRafRef.current = null;
+    }
+    const map = mapRef.current;
+    if (map) { try { map.setPaintProperty("polygon-shimmer", "fill-opacity", 0); } catch { /* noop */ } }
+  };
+
+  const confirmPlanting = () => {
+    const map = mapRef.current;
+    const verts = verticesRef.current;
+    if (!map || verts.length < MIN_POINTS_TO_CLOSE || areaError) return;
+
+    const ring = [...verts, verts[0]];
+    const poly = turf.polygon([ring]);
+    const profile = PLANT_PROFILES[config.species as PlantId] ?? PLANT_PROFILES.olive;
+
+    // Procedural seed-spread placement
+    const targetCount = Math.min(MAX_TREE_MARKERS, Math.max(40, Math.round(config.density * (config.areaHa || 0.5) * 0.18)));
+    const positions = spreadSeeds({
+      polygon: poly,
+      emitters: verts,
+      count: targetCount,
+      profile,
+      seed: Math.floor(Math.random() * 9999),
+    });
+
+    // Clear previous trees
+    treeMarkersRef.current.forEach((m) => m.remove());
+    treeMarkersRef.current = [];
+
+    setPhase("planted");
+    onMissionRun(true);
+    setHint(`Planting ${positions.length} ${profile.label.toLowerCase()} across ${areaKm2.toFixed(2)} km²`);
+
+    // Stagger spawn with GSAP
+    positions.forEach((pos, i) => {
+      const el = document.createElement("div");
+      el.className = "arbor-tree";
+      el.style.setProperty("--c", profile.color);
+      const m = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat(pos)
+        .addTo(map);
+      treeMarkersRef.current.push(m);
+
+      gsap.fromTo(
+        el,
+        { scale: profile.growth.scaleFrom, opacity: 0, rotation: (Math.random() - 0.5) * profile.growth.rotationJitter * 2 },
+        {
+          scale: 0.85 + Math.random() * 0.4,
+          opacity: 1,
+          rotation: 0,
+          duration: profile.growth.duration,
+          delay: (i / positions.length) * 1.6 + Math.random() * 0.15,
+          ease: profile.growth.ease,
+        }
+      );
+    });
+
+    // After all spawn, mark mission idle (visualization stays)
+    gsap.delayedCall(2.4, () => onMissionRun(false));
+  };
 
   const flashWarn = () => {
     const el = containerRef.current;
@@ -477,38 +685,39 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
   };
 
   const reset = () => {
-    if (running) return;
     verticesRef.current = [];
     setPointCount(0);
-    setConfirmed(false);
+    setPhase("idle");
     setAreaKm2(0);
     setAreaError(null);
+    setSnapHover(false);
+    setSuggested(null);
+    setSuitability(0);
+    onMissionRun(false);
+    onAreaChange(0);
+    stopShimmer();
     updateGeometry();
 
-    droneMarkersRef.current.forEach((m) => m.remove());
-    droneMarkersRef.current = [];
     treeMarkersRef.current.forEach((m) => m.remove());
     treeMarkersRef.current = [];
 
     const map = mapRef.current;
-    if (map?.getSource("droneTrail")) {
-      (map.getSource("droneTrail") as maplibregl.GeoJSONSource).setData(turf.featureCollection([]));
+    if (map) {
+      (map.getSource("ghost") as maplibregl.GeoJSONSource)?.setData(turf.featureCollection([]));
+      map.getCanvas().style.cursor = "";
     }
 
-    // Unlock province
-    if (lockedProvinceRef.current && map) {
-      map.setFeatureState({ source: "provinces", id: lockedProvinceRef.current.id }, { selected: false });
+    if (lockedRef.current && map) {
+      map.setFeatureState({ source: "provinces", id: lockedRef.current.id }, { selected: false });
     }
-    lockedProvinceRef.current = null;
-    setLockedProvinceName(null);
+    lockedRef.current = null;
+    setLockedProvince(null);
 
-    // Remove search pin
     if (searchPinRef.current) {
       searchPinRef.current.marker.remove();
       searchPinRef.current = null;
     }
 
-    // Fly back to country view
     map?.flyTo({
       center: [43.7, 33.2],
       zoom: 5.4,
@@ -519,43 +728,26 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
       easing: (t) => 1 - Math.pow(1 - t, 3),
     });
 
-    setHint("Search a place or click a province to start");
+    setHint("Click a province to lock your planting region");
   };
 
-  const confirmArea = () => {
-    if (running || pointCount < MIN_POINTS || areaError) return;
-    setConfirmed(true);
-    setHint(`Area confirmed · ${areaKm2.toFixed(2)} km² ready for deployment`);
-    // Cinematic emphasis pulse
-    const map = mapRef.current;
-    if (!map) return;
-    gsap.fromTo(
-      { v: 0.32 },
-      { v: 0.32 },
-      {
-        v: 0.18,
-        duration: 0.9,
-        ease: "expo.out",
-        onUpdate: function () {
-          const o = (this.targets()[0] as { v: number }).v;
-          map.setPaintProperty("polygon-glow-inner", "fill-opacity", o);
-        },
-      }
-    );
+  const undoLastPoint = () => {
+    if (phase !== "drawing" || !verticesRef.current.length) return;
+    verticesRef.current = verticesRef.current.slice(0, -1);
+    setPointCount(verticesRef.current.length);
+    updateGeometry();
   };
 
-  // ---------- Search → flyTo + drop pin ----------
+  // ---------- Search → constrained to locked province ----------
   const handleSearchSelect = (r: GeocodeResult) => {
     const map = mapRef.current;
     if (!map) return;
 
-    // Remove previous pin
     if (searchPinRef.current) {
       searchPinRef.current.marker.remove();
       searchPinRef.current = null;
     }
 
-    // Drop animated pin
     const el = document.createElement("div");
     el.className = "arbor-search-pin";
     el.innerHTML = `<div class="asp-ring"></div><div class="asp-dot"></div>`;
@@ -565,30 +757,29 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
     searchPinRef.current = { marker, name: r.short };
     gsap.fromTo(el, { scale: 0, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.6, ease: "back.out(2.4)" });
 
-    // Smooth fly — north-up, flat
     if (r.bbox) {
       map.fitBounds(
-        [
-          [r.bbox[0], r.bbox[1]],
-          [r.bbox[2], r.bbox[3]],
-        ],
-        { padding: 80, duration: 1400, pitch: 0, bearing: 0, essential: true, maxZoom: 13 }
+        [[r.bbox[0], r.bbox[1]], [r.bbox[2], r.bbox[3]]],
+        { padding: 100, duration: 1300, pitch: 0, bearing: 0, essential: true, maxZoom: 14 }
       );
     } else {
       map.flyTo({
-        center: [r.lng, r.lat],
-        zoom: 12,
-        pitch: 0,
-        bearing: 0,
-        speed: 0.8,
-        curve: 1.6,
+        center: [r.lng, r.lat], zoom: 13, pitch: 0, bearing: 0,
+        speed: 0.8, curve: 1.6, essential: true,
         easing: (t) => 1 - Math.pow(1 - t, 4),
-        essential: true,
       });
     }
-
-    setHint(`Centered on ${r.short} · click a province to lock and draw`);
+    setHint(`Centered on ${r.short} · click "Start drawing" to outline your area`);
   };
+
+  // Plant suggestion adoption
+  const adoptSuggestion = () => {
+    if (!suggested) return;
+    onPlantChange?.(suggested);
+  };
+
+  const recommendedDensity = suggested ? recommendDensity(suggested, config.areaHa) : null;
+  const activeProfile = PLANT_PROFILES[config.species as PlantId] ?? null;
 
   return (
     <div className="relative h-full w-full">
@@ -604,31 +795,33 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
         aria-hidden
       />
 
-      {/* Search bar */}
-      <div className="absolute top-4 left-4 right-4 sm:right-auto sm:w-[420px] z-20">
-        <MapSearch onSelect={handleSearchSelect} />
-      </div>
+      {/* Search bar — appears ONLY after a province is locked */}
+      {lockedProvince && (
+        <div className="absolute top-4 left-4 right-4 sm:right-auto sm:w-[440px] z-20 animate-fade-in">
+          <MapSearch
+            onSelect={handleSearchSelect}
+            viewbox={lockedProvince.bbox}
+            placeholder={`Search inside ${lockedProvince.id}…`}
+          />
+        </div>
+      )}
 
       {/* Locked-province chip */}
-      {lockedProvinceName && (
+      {lockedProvince && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 hidden md:block">
           <div className="glass-subtle px-3 py-1.5 rounded-full text-[11px] flex items-center gap-2 font-mono">
             <Lock className="h-3 w-3 text-primary" />
             <span className="text-muted-foreground uppercase tracking-wider">Locked</span>
-            <span className="text-foreground/90">{lockedProvinceName}</span>
+            <span className="text-foreground/90">{lockedProvince.id}</span>
           </div>
         </div>
       )}
 
-      {/* Tooltip */}
-      {tooltip.visible && (
+      {/* Province hover tooltip */}
+      {tooltip.visible && !lockedProvince && (
         <div
           className="pointer-events-none absolute z-20 glass rounded-xl px-4 py-3 min-w-[200px] animate-fade-in"
-          style={{
-            left: tooltip.x + 18,
-            top: tooltip.y + 18,
-            transform: "translate3d(0,0,0)",
-          }}
+          style={{ left: tooltip.x + 18, top: tooltip.y + 18, transform: "translate3d(0,0,0)" }}
         >
           <p className="text-[10px] tracking-[0.2em] uppercase text-primary/80 font-mono">Province</p>
           <p className="font-display text-lg leading-tight mt-0.5">{tooltip.name}</p>
@@ -652,12 +845,57 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
         </div>
       )}
 
-      {/* Hint bar — bottom center, above buttons */}
+      {/* Smart suggestion card — appears when locked, before drawing */}
+      {lockedProvince && suggested && phase !== "planted" && (
+        <div className="absolute top-20 left-4 z-10 animate-fade-in">
+          <div className="glass rounded-xl px-4 py-3 min-w-[230px]">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <p className="text-[10px] uppercase tracking-[0.2em] text-primary/80 font-mono">Smart suggestion</p>
+            </div>
+            <div className="mt-2 flex items-center gap-3">
+              <span className="text-2xl leading-none">{PLANT_PROFILES[suggested].emoji}</span>
+              <div className="flex-1 min-w-0">
+                <p className="font-display text-base leading-tight">{PLANT_PROFILES[suggested].label}</p>
+                <p className="text-[10px] text-muted-foreground leading-snug truncate">
+                  {PLANT_PROFILES[suggested].climateFit}
+                </p>
+              </div>
+            </div>
+            <div className="hairline my-2.5" />
+            <div className="flex items-center justify-between text-[10px] font-mono">
+              <span className="text-muted-foreground uppercase tracking-wider">Soil fit</span>
+              <span className="text-primary">{Math.round(suitability * 100)}%</span>
+            </div>
+            {recommendedDensity && (
+              <div className="flex items-center justify-between text-[10px] font-mono mt-1">
+                <span className="text-muted-foreground uppercase tracking-wider">Density</span>
+                <span className="text-foreground/85">{recommendedDensity} /ha</span>
+              </div>
+            )}
+            {config.species !== suggested && (
+              <button
+                onClick={adoptSuggestion}
+                className="mt-3 w-full px-3 py-1.5 rounded-md bg-primary/15 hover:bg-primary/25 text-primary text-[11px] font-medium transition-colors"
+              >
+                Use {PLANT_PROFILES[suggested].label}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Hint bar */}
       <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-10 animate-fade-in max-w-[92%]">
         <div className="glass px-4 py-2.5 rounded-full text-xs sm:text-sm flex items-center gap-3 whitespace-nowrap">
           <span className="h-2 w-2 rounded-full bg-primary animate-glow-pulse" />
           <span className="text-foreground/85">{hint}</span>
-          <span className="text-muted-foreground font-mono">{pointCount}/{MAX_POINTS}</span>
+          {phase === "drawing" && (
+            <span className="text-muted-foreground font-mono">{pointCount} pt{pointCount === 1 ? "" : "s"}</span>
+          )}
+          {snapHover && (
+            <span className="text-primary font-mono uppercase tracking-wider text-[10px]">snap</span>
+          )}
         </div>
       </div>
 
@@ -665,20 +903,27 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
       {pointCount >= 3 && (
         <div className="absolute top-20 right-4 z-10 animate-fade-in">
           <div className={[
-            "glass rounded-xl px-4 py-3 min-w-[180px]",
+            "glass rounded-xl px-4 py-3 min-w-[200px]",
             areaError ? "ring-1 ring-destructive/50" : "",
           ].join(" ")}>
             <div className="flex items-center justify-between">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Area</p>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Planting area</p>
               {areaError && <AlertTriangle className="h-3.5 w-3.5 text-destructive" />}
-              {!areaError && confirmed && <Check className="h-3.5 w-3.5 text-primary" />}
+              {!areaError && phase !== "drawing" && <Check className="h-3.5 w-3.5 text-primary" />}
             </div>
             <p className="font-display text-2xl mt-1 leading-none">
               {areaKm2.toFixed(areaKm2 < 1 ? 3 : 2)} <span className="text-sm text-muted-foreground">km²</span>
             </p>
-            <p className="font-mono text-[11px] text-muted-foreground mt-1">
-              {(areaKm2 * 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 0 })} m²
-            </p>
+            <div className="grid grid-cols-2 gap-2 mt-1.5 text-[11px] font-mono text-muted-foreground">
+              <div>
+                <p className="text-[9px] uppercase tracking-wider">Hectares</p>
+                <p className="text-foreground/85">{(areaKm2 * 100).toFixed(2)} ha</p>
+              </div>
+              <div>
+                <p className="text-[9px] uppercase tracking-wider">m²</p>
+                <p className="text-foreground/85">{(areaKm2 * 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+              </div>
+            </div>
             <div className="hairline my-2" />
             <div className="flex items-center justify-between text-[10px] font-mono">
               <span className="text-muted-foreground">Limit</span>
@@ -686,6 +931,24 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
                 {SOFT_AREA_KM2}–{MAX_AREA_KM2} km²
               </span>
             </div>
+            {phase !== "drawing" && activeProfile && !areaError && (
+              <>
+                <div className="hairline my-2" />
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-muted-foreground">Plant</span>
+                  <span className="text-foreground/90 inline-flex items-center gap-1.5">
+                    <span>{activeProfile.emoji}</span>
+                    <span className="font-mono">{activeProfile.label}</span>
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] mt-1">
+                  <span className="text-muted-foreground">Est. trees</span>
+                  <span className="font-mono text-primary">
+                    {Math.round(config.density * (config.areaHa || 0)).toLocaleString()}
+                  </span>
+                </div>
+              </>
+            )}
             {areaError && (
               <p className="text-[10px] text-destructive mt-2 leading-snug">{areaError}</p>
             )}
@@ -694,23 +957,62 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
       )}
 
       {/* Bottom controls */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex gap-3">
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex flex-wrap justify-center gap-2.5">
         <button
           onClick={reset}
-          disabled={running}
-          className="glass-subtle px-5 py-2.5 rounded-full text-sm hover-lift disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-2"
+          className="glass-subtle px-4 py-2.5 rounded-full text-sm hover-lift inline-flex items-center gap-2"
         >
           <RotateCcw className="h-3.5 w-3.5" />
           Reset
         </button>
-        <button
-          onClick={confirmArea}
-          disabled={pointCount < MIN_POINTS || !!areaError || running || confirmed}
-          className="relative px-6 py-2.5 rounded-full bg-gradient-primary text-primary-foreground font-medium text-sm hover-lift disabled:opacity-40 disabled:cursor-not-allowed shadow-glow-soft inline-flex items-center gap-2"
-        >
-          <Check className="h-3.5 w-3.5" />
-          {confirmed ? "Area Confirmed" : "Confirm Area"}
-        </button>
+
+        {phase === "idle" && lockedProvince && (
+          <button
+            onClick={startDrawing}
+            className="px-5 py-2.5 rounded-full bg-gradient-primary text-primary-foreground font-medium text-sm hover-lift shadow-glow-soft inline-flex items-center gap-2"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Start drawing
+          </button>
+        )}
+
+        {phase === "drawing" && (
+          <>
+            <button
+              onClick={undoLastPoint}
+              disabled={pointCount === 0}
+              className="glass-subtle px-4 py-2.5 rounded-full text-sm hover-lift disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Undo
+            </button>
+            <button
+              onClick={finishArea}
+              disabled={pointCount < MIN_POINTS_TO_CLOSE || !!areaError}
+              className="px-5 py-2.5 rounded-full bg-gradient-primary text-primary-foreground font-medium text-sm hover-lift disabled:opacity-40 disabled:cursor-not-allowed shadow-glow-soft inline-flex items-center gap-2"
+            >
+              <Flag className="h-3.5 w-3.5" />
+              Finish Area
+            </button>
+          </>
+        )}
+
+        {phase === "closed" && (
+          <button
+            onClick={confirmPlanting}
+            disabled={!!areaError}
+            className="px-6 py-2.5 rounded-full bg-gradient-primary text-primary-foreground font-medium text-sm hover-lift disabled:opacity-40 disabled:cursor-not-allowed shadow-glow-soft inline-flex items-center gap-2"
+          >
+            <Check className="h-3.5 w-3.5" />
+            Confirm Planting
+          </button>
+        )}
+
+        {phase === "planted" && (
+          <div className="px-5 py-2.5 rounded-full glass-subtle text-sm inline-flex items-center gap-2 font-mono">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-glow-pulse" />
+            {treeMarkersRef.current.length} planted
+          </div>
+        )}
       </div>
 
       {/* Marker styles */}
@@ -762,6 +1064,14 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun }: Props) => 
 };
 
 // ---------- helpers ----------
+function applyPolyColors(map: maplibregl.Map, outer: string, inner: string, outline: string) {
+  try {
+    map.setPaintProperty("polygon-glow-outer", "fill-color", outer);
+    map.setPaintProperty("polygon-glow-inner", "fill-color", inner);
+    map.setPaintProperty("polygon-outline", "line-color", outline);
+  } catch { /* style still loading */ }
+}
+
 function spawnRipple(map: maplibregl.Map, lngLat: LngLat) {
   for (let i = 0; i < 2; i++) {
     const el = document.createElement("div");
@@ -781,3 +1091,6 @@ function spawnRipple(map: maplibregl.Map, lngLat: LngLat) {
     );
   }
 }
+
+// Quiet TS unused warning for TreeSpecies import (used implicitly via PlantId).
+export type { TreeSpecies };
