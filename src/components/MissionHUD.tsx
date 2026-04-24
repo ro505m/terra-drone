@@ -42,7 +42,7 @@ export const MissionHUD = ({ config, onChange, running, className }: Props) => {
       {/* Tree species */}
       <section>
         <Label>Tree species</Label>
-        <div className="grid grid-cols-3 gap-2 mt-2">
+        <div className="grid grid-cols-5 gap-1.5 mt-2">
           {(Object.keys(TREE_PROFILES) as TreeSpecies[]).map((s) => {
             const p = TREE_PROFILES[s];
             const active = config.species === s;
