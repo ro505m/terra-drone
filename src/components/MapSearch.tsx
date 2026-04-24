@@ -180,7 +180,7 @@ export const MapSearch = ({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKey}
           onFocus={() => results.length && setOpen(true)}
-          placeholder="Search city, district, or street in Iraq…"
+          placeholder={placeholder}
           className="bg-transparent outline-none text-sm flex-1 placeholder:text-muted-foreground min-w-0"
           aria-label="Search location"
         />
