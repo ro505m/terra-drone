@@ -19,6 +19,7 @@ interface Props {
   countryCodes?: string;
   onSelect: (r: GeocodeResult) => void;
   className?: string;
+  placeholder?: string;
 }
 
 /**
