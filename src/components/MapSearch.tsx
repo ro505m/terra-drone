@@ -31,6 +31,7 @@ export const MapSearch = ({
   countryCodes = "iq",
   onSelect,
   className,
+  placeholder = "Search city, district, or street in Iraq…",
 }: Props) => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GeocodeResult[]>([]);
