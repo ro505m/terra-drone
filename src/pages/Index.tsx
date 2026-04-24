@@ -100,6 +100,7 @@ const Index = () => {
                 config={config}
                 onAreaChange={(areaHa) => setConfig((c) => ({ ...c, areaHa }))}
                 onMissionRun={setRunning}
+                onPlantChange={(species) => setConfig((c) => ({ ...c, species }))}
               />
             </div>
             <MissionHUD config={config} onChange={setConfig} running={running} />
