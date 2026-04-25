@@ -101,6 +101,46 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
+  // Drone cleanup helper (closure over refs)
+  const cleanupDrones = useCallback(() => {
+    droneRafsRef.current.forEach((id) => cancelAnimationFrame(id));
+    droneRafsRef.current = [];
+    droneMarkersRef.current.forEach((m) => m.remove());
+    droneMarkersRef.current = [];
+  }, []);
+
+  // Spawn trees instantly with stagger (fallback when no planters)
+  const spawnTrees = useCallback((map: maplibregl.Map, positions: LngLat[], profile: typeof PLANT_PROFILES[PlantId], color: string, emoji: string) => {
+    positions.forEach((pos, i) => {
+      const el = makeTreeEl(color, emoji);
+      const m = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(pos).addTo(map);
+      treeMarkersRef.current.push(m);
+      gsap.fromTo(
+        el,
+        { scale: profile.growth.scaleFrom, opacity: 0 },
+        {
+          scale: 1, opacity: 1,
+          duration: profile.growth.duration,
+          delay: (i / positions.length) * 1.6 + Math.random() * 0.15,
+          ease: profile.growth.ease,
+        }
+      );
+    });
+    mission.setTreesPlanted(positions.length);
+  }, [mission]);
+
+  const dropTreeAt = useCallback((map: maplibregl.Map, pos: LngLat, profile: typeof PLANT_PROFILES[PlantId], color: string, emoji: string) => {
+    const el = makeTreeEl(color, emoji);
+    const m = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(pos).addTo(map);
+    treeMarkersRef.current.push(m);
+    gsap.fromTo(
+      el,
+      { scale: profile.growth.scaleFrom, opacity: 0 },
+      { scale: 1, opacity: 1, duration: 0.6, ease: "back.out(2)" }
+    );
+  }, []);
+
+
   const verticesRef = useRef<LngLat[]>([]);
   const treeMarkersRef = useRef<maplibregl.Marker[]>([]);
   const hoveredProvinceRef = useRef<string | null>(null);
