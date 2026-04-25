@@ -347,43 +347,9 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
     map.on("click", "province-fill", (e) => {
       if (lockedRef.current) return;
       if (verticesRef.current.length > 0) return;
-
       const f = e.features?.[0];
       if (!f) return;
-      const name = f.properties?.name as string;
-      const geom = f as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
-      const centroid = turf.centroid(geom).geometry.coordinates as LngLat;
-      const bbox = turf.bbox(geom) as [number, number, number, number];
-
-      const locked: LockedProvince = { id: name, geom, bbox, centroid };
-      lockedRef.current = locked;
-      setLockedProvince(locked);
-      map.setFeatureState({ source: "provinces", id: name }, { selected: true });
-
-      // Suggest plant from latitude
-      const sug = suggestPlantByLatitude(centroid[1]);
-      setSuggested(sug);
-      const fit = soilSuitability(centroid[1], centroid[0], sug);
-      setSuitability(fit);
-      onPlantChange?.(sug);
-
-      map.fitBounds(
-        [
-          [bbox[0], bbox[1]],
-          [bbox[2], bbox[3]],
-        ],
-        {
-          padding: 80,
-          duration: 1400,
-          pitch: 0,
-          bearing: 0,
-          essential: true,
-          maxZoom: 10,
-          easing: (t) => 1 - Math.pow(1 - t, 4),
-        }
-      );
-
-      setHint(`${name} locked · search a place or click "Start drawing"`);
+      lockProvinceByFeature(f as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
       e.preventDefault();
     });
 
