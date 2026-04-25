@@ -21,6 +21,10 @@ interface Props {
   onAreaChange: (areaHa: number) => void;
   onMissionRun: (running: boolean) => void;
   onPlantChange?: (plant: PlantId) => void;
+  /** Externally-controlled province lock (e.g. from a dropdown). */
+  externalProvinceName?: string | null;
+  /** Fires when a province gets locked (by click or external trigger). */
+  onProvinceLock?: (info: { name: string; centroid: [number, number] } | null) => void;
 }
 
 type LngLat = [number, number];
@@ -85,7 +89,7 @@ interface LockedProvince {
 
 type Phase = "idle" | "drawing" | "closed" | "planted";
 
-export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChange }: Props) => {
+export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChange, externalProvinceName, onProvinceLock }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
