@@ -480,6 +480,21 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
   // Keep phaseRef in sync
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
+  // Listen for global "Start Mission" trigger from MissionHUD
+  const lastLaunchRef = useRef(0);
+  useEffect(() => {
+    if (mission.launchToken === 0 || mission.launchToken === lastLaunchRef.current) return;
+    lastLaunchRef.current = mission.launchToken;
+    if (verticesRef.current.length >= MIN_POINTS_TO_CLOSE && !areaError) {
+      confirmPlanting();
+    } else {
+      setHint("Draw a planting area first, then Start Mission");
+      flashWarn();
+      mission.setPhase("idle");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mission.launchToken]);
+
   // Mark first vertex with feature-state (visual emphasis when snap-ready)
   useEffect(() => {
     const map = mapRef.current;
