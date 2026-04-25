@@ -256,9 +256,9 @@ export const MissionHUD = ({ className }: Props) => {
         )}
 
         {breakdown.warnings.map((w, i) => (
-          <div key={i} className="mt-2 rounded-md bg-amber-500/10 border border-amber-500/30 px-2.5 py-1.5 flex items-start gap-2">
-            <AlertTriangle className="h-3 w-3 text-amber-400 mt-0.5 shrink-0" />
-            <p className="text-[10px] text-amber-300/90 leading-snug">{w}</p>
+          <div key={i} className="mt-2 rounded-md bg-secondary/10 border border-secondary/30 px-2.5 py-1.5 flex items-start gap-2">
+            <AlertTriangle className="h-3 w-3 text-secondary mt-0.5 shrink-0" />
+            <p className="text-[10px] text-secondary/90 leading-snug">{w}</p>
           </div>
         ))}
       </section>
