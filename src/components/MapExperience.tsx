@@ -89,7 +89,15 @@ interface LockedProvince {
 
 type Phase = "idle" | "drawing" | "closed" | "planted";
 
-export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChange, externalProvinceName, onProvinceLock }: Props) => {
+export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLock }: Props) => {
+  const mission = useMission();
+  // Derive PlantId & density from the unified mission state
+  const activeTree = IRAQI_TREES[mission.treeId];
+  const activePlantId = (activeTree?.plantId ?? "olive") as PlantId;
+  const droneFleet = activeDronesList(mission.droneCounts);
+  const droneRafsRef = useRef<number[]>([]);
+  const droneMarkersRef = useRef<maplibregl.Marker[]>([]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
