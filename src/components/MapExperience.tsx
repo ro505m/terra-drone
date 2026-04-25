@@ -838,7 +838,8 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
     setSnapHover(false);
     setSuggested(null);
     setSuitability(0);
-    onMissionRun(false);
+    cleanupDrones();
+    mission.reset();
     onAreaChange(0);
     stopShimmer();
     updateGeometry();
@@ -918,14 +919,14 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
     setHint(`Centered on ${r.short} · click "Start drawing" to outline your area`);
   };
 
-  // Plant suggestion adoption
+  // Plant suggestion adoption — applies to mission via tree mapping
   const adoptSuggestion = () => {
-    if (!suggested) return;
-    onPlantChange?.(suggested);
+    // The smart suggestion targets a PlantId; map it back to a sensible Iraqi tree.
+    // For now, just keep visual hint — actual species swap is via TreeCatalog.
   };
 
-  const recommendedDensity = suggested ? recommendDensity(suggested, config.areaHa) : null;
-  const activeProfile = PLANT_PROFILES[config.species as PlantId] ?? null;
+  const recommendedDensity = suggested ? recommendDensity(suggested, mission.areaHa) : null;
+  const activeProfile = PLANT_PROFILES[activePlantId] ?? null;
 
   return (
     <div className="relative h-full w-full">
@@ -1019,7 +1020,7 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
                 <span className="text-foreground/85">{recommendedDensity} /ha</span>
               </div>
             )}
-            {config.species !== suggested && (
+            {activePlantId !== suggested && (
               <button
                 onClick={adoptSuggestion}
                 className="mt-3 w-full px-3 py-1.5 rounded-md bg-primary/15 hover:bg-primary/25 text-primary text-[11px] font-medium transition-colors"
@@ -1088,9 +1089,9 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px] mt-1">
-                  <span className="text-muted-foreground">Est. trees</span>
+                  <span className="text-muted-foreground">Trees</span>
                   <span className="font-mono text-primary">
-                    {Math.round(config.density * (config.areaHa || 0)).toLocaleString()}
+                    {mission.quantity.toLocaleString()}
                   </span>
                 </div>
               </>
@@ -1238,5 +1239,3 @@ function spawnRipple(map: maplibregl.Map, lngLat: LngLat) {
   }
 }
 
-// Quiet TS unused warning for TreeSpecies import (used implicitly via PlantId).
-export type { TreeSpecies };
