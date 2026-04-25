@@ -743,6 +743,7 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
     }
     lockedRef.current = null;
     setLockedProvince(null);
+    onProvinceLock?.(null);
 
     if (searchPinRef.current) {
       searchPinRef.current.marker.remove();
