@@ -21,6 +21,10 @@ interface Props {
   onAreaChange: (areaHa: number) => void;
   onMissionRun: (running: boolean) => void;
   onPlantChange?: (plant: PlantId) => void;
+  /** Externally-controlled province lock (e.g. from a dropdown). */
+  externalProvinceName?: string | null;
+  /** Fires when a province gets locked (by click or external trigger). */
+  onProvinceLock?: (info: { name: string; centroid: [number, number] } | null) => void;
 }
 
 type LngLat = [number, number];
@@ -85,7 +89,7 @@ interface LockedProvince {
 
 type Phase = "idle" | "drawing" | "closed" | "planted";
 
-export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChange }: Props) => {
+export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChange, externalProvinceName, onProvinceLock }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
 
@@ -343,43 +347,9 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
     map.on("click", "province-fill", (e) => {
       if (lockedRef.current) return;
       if (verticesRef.current.length > 0) return;
-
       const f = e.features?.[0];
       if (!f) return;
-      const name = f.properties?.name as string;
-      const geom = f as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
-      const centroid = turf.centroid(geom).geometry.coordinates as LngLat;
-      const bbox = turf.bbox(geom) as [number, number, number, number];
-
-      const locked: LockedProvince = { id: name, geom, bbox, centroid };
-      lockedRef.current = locked;
-      setLockedProvince(locked);
-      map.setFeatureState({ source: "provinces", id: name }, { selected: true });
-
-      // Suggest plant from latitude
-      const sug = suggestPlantByLatitude(centroid[1]);
-      setSuggested(sug);
-      const fit = soilSuitability(centroid[1], centroid[0], sug);
-      setSuitability(fit);
-      onPlantChange?.(sug);
-
-      map.fitBounds(
-        [
-          [bbox[0], bbox[1]],
-          [bbox[2], bbox[3]],
-        ],
-        {
-          padding: 80,
-          duration: 1400,
-          pitch: 0,
-          bearing: 0,
-          essential: true,
-          maxZoom: 10,
-          easing: (t) => 1 - Math.pow(1 - t, 4),
-        }
-      );
-
-      setHint(`${name} locked · search a place or click "Start drawing"`);
+      lockProvinceByFeature(f as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>);
       e.preventDefault();
     });
 
@@ -533,6 +503,67 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
       onAreaChange(0);
     }
   }, [onAreaChange]);
+
+  // ---------- Province lock (shared by click + external prop) ----------
+  const lockProvinceByFeature = useCallback(
+    (f: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>) => {
+      const map = mapRef.current;
+      if (!map) return;
+      const name = (f.properties as { name?: string } | null)?.name as string;
+      if (!name) return;
+
+      const centroid = turf.centroid(f).geometry.coordinates as LngLat;
+      const bbox = turf.bbox(f) as [number, number, number, number];
+      const locked: LockedProvince = { id: name, geom: f, bbox, centroid };
+
+      if (lockedRef.current && lockedRef.current.id !== name) {
+        map.setFeatureState({ source: "provinces", id: lockedRef.current.id }, { selected: false });
+      }
+      lockedRef.current = locked;
+      setLockedProvince(locked);
+      map.setFeatureState({ source: "provinces", id: name }, { selected: true });
+
+      const sug = suggestPlantByLatitude(centroid[1]);
+      setSuggested(sug);
+      const fit = soilSuitability(centroid[1], centroid[0], sug);
+      setSuitability(fit);
+      onPlantChange?.(sug);
+
+      map.fitBounds(
+        [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
+        {
+          padding: 80,
+          duration: 1400,
+          pitch: 0,
+          bearing: 0,
+          essential: true,
+          maxZoom: 10,
+          easing: (t) => 1 - Math.pow(1 - t, 4),
+        }
+      );
+
+      setHint(`${name} locked · search a place or click "Start drawing"`);
+      onProvinceLock?.({ name, centroid: [centroid[0], centroid[1]] });
+    },
+    [onPlantChange, onProvinceLock]
+  );
+
+  // External province selection (e.g. dropdown)
+  useEffect(() => {
+    if (!externalProvinceName) return;
+    if (lockedRef.current?.id === externalProvinceName) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    const trigger = () => {
+      const feat = (PROVINCES.features as GeoJSON.Feature[]).find(
+        (f) => (f.properties as { name?: string } | null)?.name === externalProvinceName
+      ) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | undefined;
+      if (feat) lockProvinceByFeature(feat);
+    };
+    if (map.isStyleLoaded()) trigger();
+    else map.once("load", trigger);
+  }, [externalProvinceName, lockProvinceByFeature]);
 
   // ---------- Phase actions ----------
   const startDrawing = () => {
@@ -712,6 +743,7 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
     }
     lockedRef.current = null;
     setLockedProvince(null);
+    onProvinceLock?.(null);
 
     if (searchPinRef.current) {
       searchPinRef.current.marker.remove();
