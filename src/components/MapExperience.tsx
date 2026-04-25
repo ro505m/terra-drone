@@ -504,6 +504,67 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
     }
   }, [onAreaChange]);
 
+  // ---------- Province lock (shared by click + external prop) ----------
+  const lockProvinceByFeature = useCallback(
+    (f: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>) => {
+      const map = mapRef.current;
+      if (!map) return;
+      const name = (f.properties as { name?: string } | null)?.name as string;
+      if (!name) return;
+
+      const centroid = turf.centroid(f).geometry.coordinates as LngLat;
+      const bbox = turf.bbox(f) as [number, number, number, number];
+      const locked: LockedProvince = { id: name, geom: f, bbox, centroid };
+
+      if (lockedRef.current && lockedRef.current.id !== name) {
+        map.setFeatureState({ source: "provinces", id: lockedRef.current.id }, { selected: false });
+      }
+      lockedRef.current = locked;
+      setLockedProvince(locked);
+      map.setFeatureState({ source: "provinces", id: name }, { selected: true });
+
+      const sug = suggestPlantByLatitude(centroid[1]);
+      setSuggested(sug);
+      const fit = soilSuitability(centroid[1], centroid[0], sug);
+      setSuitability(fit);
+      onPlantChange?.(sug);
+
+      map.fitBounds(
+        [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
+        {
+          padding: 80,
+          duration: 1400,
+          pitch: 0,
+          bearing: 0,
+          essential: true,
+          maxZoom: 10,
+          easing: (t) => 1 - Math.pow(1 - t, 4),
+        }
+      );
+
+      setHint(`${name} locked · search a place or click "Start drawing"`);
+      onProvinceLock?.({ name, centroid: [centroid[0], centroid[1]] });
+    },
+    [onPlantChange, onProvinceLock]
+  );
+
+  // External province selection (e.g. dropdown)
+  useEffect(() => {
+    if (!externalProvinceName) return;
+    if (lockedRef.current?.id === externalProvinceName) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    const trigger = () => {
+      const feat = (PROVINCES.features as GeoJSON.Feature[]).find(
+        (f) => (f.properties as { name?: string } | null)?.name === externalProvinceName
+      ) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | undefined;
+      if (feat) lockProvinceByFeature(feat);
+    };
+    if (map.isStyleLoaded()) trigger();
+    else map.once("load", trigger);
+  }, [externalProvinceName, lockProvinceByFeature]);
+
   // ---------- Phase actions ----------
   const startDrawing = () => {
     if (!lockedRef.current) {
