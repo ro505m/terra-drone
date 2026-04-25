@@ -1205,16 +1205,31 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
       {/* Marker styles */}
       <style>{`
         .arbor-tree {
-          width: 14px; height: 14px; pointer-events: none;
+          width: 16px; height: 16px; pointer-events: none;
           display: grid; place-items: center;
+          font-size: 14px; line-height: 1;
           will-change: transform, opacity;
+          filter: drop-shadow(0 0 6px var(--c, hsl(142 92% 55%)));
         }
-        .arbor-tree::after {
-          content: ""; width: 10px; height: 10px;
-          border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-          background: var(--c, hsl(142 92% 55%));
-          box-shadow: 0 0 12px hsl(142 92% 55% / 0.55);
+        .arbor-drone {
+          position: relative; width: 18px; height: 18px; pointer-events: none;
+          will-change: transform; transition: opacity 0.4s;
         }
+        .arbor-drone .ad-body {
+          position: absolute; inset: 6px; border-radius: 50%;
+          background: hsl(220 30% 10%); border: 1px solid var(--c, hsl(142 92% 55%));
+          box-shadow: 0 0 10px var(--c, hsl(142 92% 55%));
+        }
+        .arbor-drone .ad-prop {
+          position: absolute; width: 6px; height: 1.5px;
+          background: var(--c, hsl(142 92% 55%)); opacity: 0.85;
+          animation: ad-spin 0.18s linear infinite;
+        }
+        .arbor-drone .ad-p1 { top: 2px; left: 2px; }
+        .arbor-drone .ad-p2 { top: 2px; right: 2px; }
+        .arbor-drone .ad-p3 { bottom: 2px; left: 2px; }
+        .arbor-drone .ad-p4 { bottom: 2px; right: 2px; }
+        @keyframes ad-spin { to { transform: rotate(360deg); } }
         .arbor-ripple {
           width: 28px; height: 28px; border-radius: 50%;
           border: 2px solid hsl(142 92% 60%);
