@@ -44,7 +44,7 @@ interface MissionCtx extends MissionState {
   setProvinceName: (n: string | null) => void;
   launchMission: () => void;
   setPhase: (p: MissionPhase) => void;
-  setTreesPlanted: (n: number) => void;
+  setTreesPlanted: (n: number | ((prev: number) => number)) => void;
   setActiveDronesOnMap: (n: number) => void;
   reset: () => void;
 }
