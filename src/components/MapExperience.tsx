@@ -1259,6 +1259,22 @@ function applyPolyColors(map: maplibregl.Map, outer: string, inner: string, outl
   } catch { /* style still loading */ }
 }
 
+function makeTreeEl(color: string, emoji: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.className = "arbor-tree";
+  el.style.setProperty("--c", color);
+  el.textContent = emoji;
+  return el;
+}
+
+function makeDroneEl(color: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.className = "arbor-drone";
+  el.style.setProperty("--c", color);
+  el.innerHTML = `<div class="ad-body"></div><div class="ad-prop ad-p1"></div><div class="ad-prop ad-p2"></div><div class="ad-prop ad-p3"></div><div class="ad-prop ad-p4"></div>`;
+  return el;
+}
+
 function spawnRipple(map: maplibregl.Map, lngLat: LngLat) {
   for (let i = 0; i < 2; i++) {
     const el = document.createElement("div");
