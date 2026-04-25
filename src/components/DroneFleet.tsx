@@ -8,6 +8,7 @@ import {
   estimateFleet,
 } from "@/lib/iraqiDrones";
 import { useI18n } from "@/lib/i18n";
+import { useMission } from "@/lib/missionContext";
 
 interface Props {
   className?: string;
@@ -15,16 +16,13 @@ interface Props {
 
 /**
  * DroneFleet — pick & configure a swarm of Iraq-context drones.
- * Each row shows a hand-drawn SVG with animated propellers.
+ * Bound to MissionContext so Mission Control sees every change live.
  */
 export const DroneFleet = ({ className }: Props) => {
   const { t, pick, dir } = useI18n();
-  const [counts, setCounts] = useState<Record<string, number>>({
-    agras_t40_seed: 2,
-    hexa_seeder: 1,
-    scout_quad: 1,
-  });
-  const [localMode, setLocalMode] = useState(false);
+  const { droneCounts: counts, setDroneCount, iraqMode, setIraqMode } = useMission();
+  const localMode = iraqMode;
+  const setLocalMode = setIraqMode;
 
   const totals = useMemo(() => estimateFleet(counts), [counts]);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -38,10 +36,8 @@ export const DroneFleet = ({ className }: Props) => {
     );
   }, [totals.totalCoverageHa, totals.totalFlightMinutes, totals.totalCostUsd]);
 
-  const inc = (id: string) =>
-    setCounts((c) => ({ ...c, [id]: Math.min(20, (c[id] ?? 0) + 1) }));
-  const dec = (id: string) =>
-    setCounts((c) => ({ ...c, [id]: Math.max(0, (c[id] ?? 0) - 1) }));
+  const inc = (id: string) => setDroneCount(id, (counts[id] ?? 0) + 1);
+  const dec = (id: string) => setDroneCount(id, (counts[id] ?? 0) - 1);
 
   return (
     <section

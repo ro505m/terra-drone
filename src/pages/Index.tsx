@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { gsap } from "gsap";
 import { CinematicHero } from "@/components/CinematicHero";
 import { MapExperience } from "@/components/MapExperience";
@@ -7,27 +7,17 @@ import { TreeCatalog } from "@/components/TreeCatalog";
 import { DroneFleet } from "@/components/DroneFleet";
 import { LangToggle } from "@/components/LangToggle";
 import { ProvinceSelector } from "@/components/ProvinceSelector";
-import type { MissionConfig } from "@/lib/pricing";
-import type { PlantId } from "@/lib/plants";
 import { IRAQI_TREES, recommendForProvince, type IraqiTreeId } from "@/lib/iraqiTrees";
 import { PROVINCE_META } from "@/lib/provincesMeta";
 import { useI18n } from "@/lib/i18n";
+import { useMission } from "@/lib/missionContext";
 
 const Index = () => {
   const { t, dir, lang } = useI18n();
-
-  const [config, setConfig] = useState<MissionConfig>({
-    drones: 6,
-    density: 800,
-    areaHa: 0,
-    species: "oak",
-  });
-  const [running, setRunning] = useState(false);
-
-  // Iraqi context state
-  const [provinceName, setProvinceName] = useState<string | null>(null);
-  const [centroidLat, setCentroidLat] = useState<number | undefined>(undefined);
-  const [activeTreeId, setActiveTreeId] = useState<IraqiTreeId | null>(null);
+  const {
+    treeId, provinceName, areaHa,
+    setTreeId, setProvinceName, setAreaHa,
+  } = useMission();
 
   const mapSectionRef = useRef<HTMLElement>(null);
   const sectionLabelRef = useRef<HTMLDivElement>(null);
@@ -40,22 +30,11 @@ const Index = () => {
   const handleProvinceLock = (info: { name: string; centroid: [number, number] } | null) => {
     if (!info) {
       setProvinceName(null);
-      setCentroidLat(undefined);
-      setActiveTreeId(null);
       return;
     }
     setProvinceName(info.name);
-    setCentroidLat(info.centroid[1]);
     const recs = recommendForProvince(info.name, info.centroid[1]);
-    if (recs[0]) handleTreeSelect(recs[0]);
-  };
-
-  const handleTreeSelect = (id: IraqiTreeId) => {
-    setActiveTreeId(id);
-    const tree = IRAQI_TREES[id];
-    if (tree) {
-      setConfig((c) => ({ ...c, species: tree.plantId as PlantId }));
-    }
+    if (recs[0]) setTreeId(recs[0] as IraqiTreeId);
   };
 
   // Reveal animations on scroll
@@ -81,6 +60,12 @@ const Index = () => {
     obs.observe(sectionLabelRef.current);
     return () => obs.disconnect();
   }, []);
+
+  const provinceCentroidLat = (() => {
+    if (!provinceName) return undefined;
+    const meta = PROVINCE_META.find((p) => p.name === provinceName);
+    return meta?.centroid?.[1];
+  })();
 
   return (
     <main className="relative" dir={dir}>
@@ -147,15 +132,12 @@ const Index = () => {
           <div className="grid lg:grid-cols-[1fr_auto] gap-6 items-start">
             <div className="relative h-[640px] rounded-2xl glass overflow-hidden vignette">
               <MapExperience
-                config={config}
-                onAreaChange={(areaHa) => setConfig((c) => ({ ...c, areaHa }))}
-                onMissionRun={setRunning}
-                onPlantChange={(species) => setConfig((c) => ({ ...c, species }))}
+                onAreaChange={setAreaHa}
                 externalProvinceName={provinceName}
                 onProvinceLock={handleProvinceLock}
               />
             </div>
-            <MissionHUD config={config} onChange={setConfig} running={running} />
+            <MissionHUD />
           </div>
         </div>
       </section>
@@ -182,24 +164,14 @@ const Index = () => {
           <div className="grid lg:grid-cols-[1fr_1fr] gap-6 items-start">
             <TreeCatalog
               provinceName={provinceName}
-              centroidLat={centroidLat}
-              activeId={activeTreeId}
-              onSelect={handleTreeSelect}
+              centroidLat={provinceCentroidLat}
+              activeId={treeId}
+              onSelect={(id) => setTreeId(id)}
             />
 
             {/* Live preview of the active tree */}
             <article className="glass rounded-2xl p-6 min-h-[520px] flex flex-col gap-4">
-              {activeTreeId ? (
-                <ActiveTreePreview id={activeTreeId} />
-              ) : (
-                <div className="m-auto text-center text-muted-foreground">
-                  <p className="text-sm">
-                    {lang === "ar"
-                      ? "اختر شجرة لعرض بطاقتها التفصيلية."
-                      : "Pick a tree to see its detail card."}
-                  </p>
-                </div>
-              )}
+              <ActiveTreePreview id={treeId} />
             </article>
           </div>
         </div>
@@ -261,7 +233,7 @@ const Index = () => {
       <footer className="border-t border-border/50 py-10">
         <div className="container mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
           <p>© {new Date().getFullYear()} ARBOR — {t("app_tagline")}</p>
-          <p className="font-mono">v1.1 · build·iraq</p>
+          <p className="font-mono">v1.2 · build·iraq·unified</p>
         </div>
       </footer>
     </main>

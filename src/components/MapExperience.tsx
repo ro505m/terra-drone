@@ -4,7 +4,6 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import * as turf from "@turf/turf";
 import { gsap } from "gsap";
 import { RotateCcw, Check, AlertTriangle, Lock, Flag, Sparkles, Pencil } from "lucide-react";
-import type { MissionConfig, TreeSpecies } from "@/lib/pricing";
 import {
   PLANT_PROFILES,
   suggestPlantByLatitude,
@@ -15,12 +14,13 @@ import {
 import { spreadSeeds } from "@/lib/seedSpread";
 import provincesData from "@/data/iraq-provinces.json";
 import { MapSearch, type GeocodeResult } from "./MapSearch";
+import { useMission } from "@/lib/missionContext";
+import { IRAQI_TREES } from "@/lib/iraqiTrees";
+import { IRAQI_DRONES } from "@/lib/iraqiDrones";
+import { activeDronesList } from "@/lib/iraqPricing";
 
 interface Props {
-  config: MissionConfig;
   onAreaChange: (areaHa: number) => void;
-  onMissionRun: (running: boolean) => void;
-  onPlantChange?: (plant: PlantId) => void;
   /** Externally-controlled province lock (e.g. from a dropdown). */
   externalProvinceName?: string | null;
   /** Fires when a province gets locked (by click or external trigger). */
@@ -89,9 +89,57 @@ interface LockedProvince {
 
 type Phase = "idle" | "drawing" | "closed" | "planted";
 
-export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChange, externalProvinceName, onProvinceLock }: Props) => {
+export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLock }: Props) => {
+  const mission = useMission();
+  // Derive PlantId & density from the unified mission state
+  const activeTree = IRAQI_TREES[mission.treeId];
+  const activePlantId = (activeTree?.plantId ?? "olive") as PlantId;
+  const droneFleet = activeDronesList(mission.droneCounts);
+  const droneRafsRef = useRef<number[]>([]);
+  const droneMarkersRef = useRef<maplibregl.Marker[]>([]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+
+  // Drone cleanup helper (closure over refs)
+  const cleanupDrones = useCallback(() => {
+    droneRafsRef.current.forEach((id) => cancelAnimationFrame(id));
+    droneRafsRef.current = [];
+    droneMarkersRef.current.forEach((m) => m.remove());
+    droneMarkersRef.current = [];
+  }, []);
+
+  // Spawn trees instantly with stagger (fallback when no planters)
+  const spawnTrees = useCallback((map: maplibregl.Map, positions: LngLat[], profile: typeof PLANT_PROFILES[PlantId], color: string, emoji: string) => {
+    positions.forEach((pos, i) => {
+      const el = makeTreeEl(color, emoji);
+      const m = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(pos).addTo(map);
+      treeMarkersRef.current.push(m);
+      gsap.fromTo(
+        el,
+        { scale: profile.growth.scaleFrom, opacity: 0 },
+        {
+          scale: 1, opacity: 1,
+          duration: profile.growth.duration,
+          delay: (i / positions.length) * 1.6 + Math.random() * 0.15,
+          ease: profile.growth.ease,
+        }
+      );
+    });
+    mission.setTreesPlanted(positions.length);
+  }, [mission]);
+
+  const dropTreeAt = useCallback((map: maplibregl.Map, pos: LngLat, profile: typeof PLANT_PROFILES[PlantId], color: string, emoji: string) => {
+    const el = makeTreeEl(color, emoji);
+    const m = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(pos).addTo(map);
+    treeMarkersRef.current.push(m);
+    gsap.fromTo(
+      el,
+      { scale: profile.growth.scaleFrom, opacity: 0 },
+      { scale: 1, opacity: 1, duration: 0.6, ease: "back.out(2)" }
+    );
+  }, []);
+
 
   const verticesRef = useRef<LngLat[]>([]);
   const treeMarkersRef = useRef<maplibregl.Marker[]>([]);
@@ -432,6 +480,21 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
   // Keep phaseRef in sync
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
+  // Listen for global "Start Mission" trigger from MissionHUD
+  const lastLaunchRef = useRef(0);
+  useEffect(() => {
+    if (mission.launchToken === 0 || mission.launchToken === lastLaunchRef.current) return;
+    lastLaunchRef.current = mission.launchToken;
+    if (verticesRef.current.length >= MIN_POINTS_TO_CLOSE && !areaError) {
+      confirmPlanting();
+    } else {
+      setHint("Draw a planting area first, then Start Mission");
+      flashWarn();
+      mission.setPhase("idle");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mission.launchToken]);
+
   // Mark first vertex with feature-state (visual emphasis when snap-ready)
   useEffect(() => {
     const map = mapRef.current;
@@ -527,7 +590,6 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
       setSuggested(sug);
       const fit = soilSuitability(centroid[1], centroid[0], sug);
       setSuitability(fit);
-      onPlantChange?.(sug);
 
       map.fitBounds(
         [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
@@ -545,7 +607,7 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
       setHint(`${name} locked · search a place or click "Start drawing"`);
       onProvinceLock?.({ name, centroid: [centroid[0], centroid[1]] });
     },
-    [onPlantChange, onProvinceLock]
+    [onProvinceLock]
   );
 
   // External province selection (e.g. dropdown)
@@ -643,60 +705,167 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
     if (map) { try { map.setPaintProperty("polygon-shimmer", "fill-opacity", 0); } catch { /* noop */ } }
   };
 
-  const confirmPlanting = () => {
+  const confirmPlanting = useCallback(() => {
     const map = mapRef.current;
     const verts = verticesRef.current;
     if (!map || verts.length < MIN_POINTS_TO_CLOSE || areaError) return;
 
     const ring = [...verts, verts[0]];
     const poly = turf.polygon([ring]);
-    const profile = PLANT_PROFILES[config.species as PlantId] ?? PLANT_PROFILES.olive;
+    const profile = PLANT_PROFILES[activePlantId] ?? PLANT_PROFILES.olive;
+    const treeColor = activeTree?.color ?? profile.color;
+    const treeEmoji = activeTree?.emoji ?? profile.emoji;
 
-    // Procedural seed-spread placement
-    const targetCount = Math.min(MAX_TREE_MARKERS, Math.max(40, Math.round(config.density * (config.areaHa || 0.5) * 0.18)));
+    // Quantity comes from Mission Control. Cap for marker perf.
+    const qty = Math.max(20, Math.min(MAX_TREE_MARKERS, mission.quantity || 200));
+
     const positions = spreadSeeds({
       polygon: poly,
       emitters: verts,
-      count: targetCount,
+      count: qty,
       profile,
       seed: Math.floor(Math.random() * 9999),
     });
 
-    // Clear previous trees
+    // Clear previous trees + drones
     treeMarkersRef.current.forEach((m) => m.remove());
     treeMarkersRef.current = [];
+    cleanupDrones();
 
     setPhase("planted");
-    onMissionRun(true);
-    setHint(`Planting ${positions.length} ${profile.label.toLowerCase()} across ${areaKm2.toFixed(2)} km²`);
+    mission.setPhase("running");
+    mission.setTreesPlanted(0);
+    setHint(`Planting ${positions.length} ${activeTree ? "" : profile.label.toLowerCase()} across ${areaKm2.toFixed(2)} km²`);
 
-    // Stagger spawn with GSAP
-    positions.forEach((pos, i) => {
-      const el = document.createElement("div");
-      el.className = "arbor-tree";
-      el.style.setProperty("--c", profile.color);
-      const m = new maplibregl.Marker({ element: el, anchor: "center" })
-        .setLngLat(pos)
-        .addTo(map);
-      treeMarkersRef.current.push(m);
+    // ---- Drone swarm flyover ----
+    const planters = droneFleet.filter((x) => x.d.role === "seeder" || x.d.role === "hybrid");
+    const monitors = droneFleet.filter((x) => x.d.role === "monitor" || x.d.role === "sprayer");
 
-      gsap.fromTo(
-        el,
-        { scale: profile.growth.scaleFrom, opacity: 0, rotation: (Math.random() - 0.5) * profile.growth.rotationJitter * 2 },
-        {
-          scale: 0.85 + Math.random() * 0.4,
-          opacity: 1,
-          rotation: 0,
-          duration: profile.growth.duration,
-          delay: (i / positions.length) * 1.6 + Math.random() * 0.15,
-          ease: profile.growth.ease,
-        }
-      );
+    // Total drone units to render (cap visible at 12 for clarity)
+    const planterUnits: typeof droneFleet = [];
+    planters.forEach(({ d, n }) => {
+      for (let i = 0; i < Math.min(n, 6); i++) planterUnits.push({ d, n: 1 });
+    });
+    const supportUnits: typeof droneFleet = [];
+    monitors.forEach(({ d, n }) => {
+      for (let i = 0; i < Math.min(n, 3); i++) supportUnits.push({ d, n: 1 });
+    });
+    mission.setActiveDronesOnMap(planterUnits.length + supportUnits.length);
+
+    // Assign trees to planter drones round-robin
+    const assignments: Array<{ pos: LngLat; droneIdx: number; t: number }> = positions.map((pos, i) => ({
+      pos,
+      droneIdx: planterUnits.length > 0 ? i % planterUnits.length : 0,
+      t: 0,
+    }));
+    const totalSimMs = 3800; // ~4s mission visualisation
+    assignments.forEach((a, i) => {
+      a.t = (i / Math.max(1, positions.length - 1)) * totalSimMs;
     });
 
-    // After all spawn, mark mission idle (visualization stays)
-    gsap.delayedCall(2.4, () => onMissionRun(false));
-  };
+    // Spawn drone markers and animate them along their assigned tree path
+    if (planterUnits.length === 0) {
+      // No planters — just spawn trees with stagger
+      spawnTrees(map, positions, profile, treeColor, treeEmoji);
+      gsap.delayedCall(2.4, () => mission.setPhase("complete"));
+      return;
+    }
+
+    // Compute each drone's ordered visit list (trees assigned to it)
+    const droneVisits: Array<Array<{ pos: LngLat; t: number; idx: number }>> = planterUnits.map(
+      (_, di) =>
+        assignments
+          .map((a, idx) => ({ ...a, idx }))
+          .filter((a) => a.droneIdx === di)
+    );
+
+    // Drone home base = polygon centroid
+    const home: LngLat = turf.centroid(poly).geometry.coordinates as LngLat;
+
+    planterUnits.forEach((unit, di) => {
+      const el = makeDroneEl(unit.d.color);
+      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat(home)
+        .addTo(map);
+      droneMarkersRef.current.push(marker);
+
+      const visits = droneVisits[di];
+      if (visits.length === 0) return;
+
+      // Build a smooth flight: home → visits[0..n] → home
+      const path: Array<{ pos: LngLat; at: number; visitIdx: number | null }> = [
+        { pos: home, at: 0, visitIdx: null },
+        ...visits.map((v) => ({ pos: v.pos, at: v.t + (Math.random() * 250 - 125), visitIdx: v.idx })),
+        { pos: home, at: totalSimMs + 600, visitIdx: null },
+      ];
+      // Ensure monotonic times
+      for (let i = 1; i < path.length; i++) {
+        if (path[i].at < path[i - 1].at + 60) path[i].at = path[i - 1].at + 60;
+      }
+
+      const start = performance.now();
+      const tick = (now: number) => {
+        const t = now - start;
+        // Find segment
+        let i = 0;
+        while (i < path.length - 1 && path[i + 1].at < t) i++;
+        const a = path[i];
+        const b = path[Math.min(path.length - 1, i + 1)];
+        const segDur = Math.max(1, b.at - a.at);
+        const u = Math.min(1, Math.max(0, (t - a.at) / segDur));
+        // Smoothstep
+        const k = u * u * (3 - 2 * u);
+        const lng = a.pos[0] + (b.pos[0] - a.pos[0]) * k;
+        const lat = a.pos[1] + (b.pos[1] - a.pos[1]) * k;
+        marker.setLngLat([lng, lat]);
+
+        // Drop tree when arriving at a visit (u just crossed 1)
+        if (b.visitIdx !== null && u >= 0.97 && !el.dataset[`d${b.visitIdx}`]) {
+          el.dataset[`d${b.visitIdx}`] = "1";
+          dropTreeAt(map, b.pos, profile, treeColor, treeEmoji);
+          mission.setTreesPlanted(prev => prev + 1);
+        }
+
+        if (t < path[path.length - 1].at + 200) {
+          const raf = requestAnimationFrame(tick);
+          droneRafsRef.current.push(raf);
+        } else {
+          // Land animation
+          gsap.to(el, { opacity: 0.25, scale: 0.85, duration: 0.5, ease: "expo.out" });
+        }
+      };
+      const raf0 = requestAnimationFrame(tick);
+      droneRafsRef.current.push(raf0);
+    });
+
+    // Spawn passive monitor drones orbiting the centroid
+    supportUnits.forEach((unit, di) => {
+      const el = makeDroneEl(unit.d.color);
+      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+        .setLngLat(home)
+        .addTo(map);
+      droneMarkersRef.current.push(marker);
+      const radius = 0.0035 + di * 0.0015;
+      const phase0 = (di * Math.PI * 2) / Math.max(1, supportUnits.length);
+      const start = performance.now();
+      const tick = (now: number) => {
+        const t = (now - start) / 1000;
+        const ang = phase0 + t * 0.6;
+        marker.setLngLat([home[0] + Math.cos(ang) * radius, home[1] + Math.sin(ang) * radius]);
+        if (now - start < totalSimMs + 1000) {
+          const raf = requestAnimationFrame(tick);
+          droneRafsRef.current.push(raf);
+        } else {
+          gsap.to(el, { opacity: 0.2, duration: 0.6 });
+        }
+      };
+      droneRafsRef.current.push(requestAnimationFrame(tick));
+    });
+
+    gsap.delayedCall(totalSimMs / 1000 + 1.2, () => {
+      mission.setPhase("complete");
+    });
+  }, [areaError, areaKm2, activePlantId, activeTree, droneFleet, mission]);
 
   const flashWarn = () => {
     const el = containerRef.current;
@@ -724,7 +893,8 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
     setSnapHover(false);
     setSuggested(null);
     setSuitability(0);
-    onMissionRun(false);
+    cleanupDrones();
+    mission.reset();
     onAreaChange(0);
     stopShimmer();
     updateGeometry();
@@ -804,14 +974,14 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
     setHint(`Centered on ${r.short} · click "Start drawing" to outline your area`);
   };
 
-  // Plant suggestion adoption
+  // Plant suggestion adoption — applies to mission via tree mapping
   const adoptSuggestion = () => {
-    if (!suggested) return;
-    onPlantChange?.(suggested);
+    // The smart suggestion targets a PlantId; map it back to a sensible Iraqi tree.
+    // For now, just keep visual hint — actual species swap is via TreeCatalog.
   };
 
-  const recommendedDensity = suggested ? recommendDensity(suggested, config.areaHa) : null;
-  const activeProfile = PLANT_PROFILES[config.species as PlantId] ?? null;
+  const recommendedDensity = suggested ? recommendDensity(suggested, mission.areaHa) : null;
+  const activeProfile = PLANT_PROFILES[activePlantId] ?? null;
 
   return (
     <div className="relative h-full w-full">
@@ -905,7 +1075,7 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
                 <span className="text-foreground/85">{recommendedDensity} /ha</span>
               </div>
             )}
-            {config.species !== suggested && (
+            {activePlantId !== suggested && (
               <button
                 onClick={adoptSuggestion}
                 className="mt-3 w-full px-3 py-1.5 rounded-md bg-primary/15 hover:bg-primary/25 text-primary text-[11px] font-medium transition-colors"
@@ -974,9 +1144,9 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px] mt-1">
-                  <span className="text-muted-foreground">Est. trees</span>
+                  <span className="text-muted-foreground">Trees</span>
                   <span className="font-mono text-primary">
-                    {Math.round(config.density * (config.areaHa || 0)).toLocaleString()}
+                    {mission.quantity.toLocaleString()}
                   </span>
                 </div>
               </>
@@ -1050,16 +1220,31 @@ export const MapExperience = ({ config, onAreaChange, onMissionRun, onPlantChang
       {/* Marker styles */}
       <style>{`
         .arbor-tree {
-          width: 14px; height: 14px; pointer-events: none;
+          width: 16px; height: 16px; pointer-events: none;
           display: grid; place-items: center;
+          font-size: 14px; line-height: 1;
           will-change: transform, opacity;
+          filter: drop-shadow(0 0 6px var(--c, hsl(142 92% 55%)));
         }
-        .arbor-tree::after {
-          content: ""; width: 10px; height: 10px;
-          border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-          background: var(--c, hsl(142 92% 55%));
-          box-shadow: 0 0 12px hsl(142 92% 55% / 0.55);
+        .arbor-drone {
+          position: relative; width: 18px; height: 18px; pointer-events: none;
+          will-change: transform; transition: opacity 0.4s;
         }
+        .arbor-drone .ad-body {
+          position: absolute; inset: 6px; border-radius: 50%;
+          background: hsl(220 30% 10%); border: 1px solid var(--c, hsl(142 92% 55%));
+          box-shadow: 0 0 10px var(--c, hsl(142 92% 55%));
+        }
+        .arbor-drone .ad-prop {
+          position: absolute; width: 6px; height: 1.5px;
+          background: var(--c, hsl(142 92% 55%)); opacity: 0.85;
+          animation: ad-spin 0.18s linear infinite;
+        }
+        .arbor-drone .ad-p1 { top: 2px; left: 2px; }
+        .arbor-drone .ad-p2 { top: 2px; right: 2px; }
+        .arbor-drone .ad-p3 { bottom: 2px; left: 2px; }
+        .arbor-drone .ad-p4 { bottom: 2px; right: 2px; }
+        @keyframes ad-spin { to { transform: rotate(360deg); } }
         .arbor-ripple {
           width: 28px; height: 28px; border-radius: 50%;
           border: 2px solid hsl(142 92% 60%);
@@ -1104,6 +1289,22 @@ function applyPolyColors(map: maplibregl.Map, outer: string, inner: string, outl
   } catch { /* style still loading */ }
 }
 
+function makeTreeEl(color: string, emoji: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.className = "arbor-tree";
+  el.style.setProperty("--c", color);
+  el.textContent = emoji;
+  return el;
+}
+
+function makeDroneEl(color: string): HTMLDivElement {
+  const el = document.createElement("div");
+  el.className = "arbor-drone";
+  el.style.setProperty("--c", color);
+  el.innerHTML = `<div class="ad-body"></div><div class="ad-prop ad-p1"></div><div class="ad-prop ad-p2"></div><div class="ad-prop ad-p3"></div><div class="ad-prop ad-p4"></div>`;
+  return el;
+}
+
 function spawnRipple(map: maplibregl.Map, lngLat: LngLat) {
   for (let i = 0; i < 2; i++) {
     const el = document.createElement("div");
@@ -1124,5 +1325,3 @@ function spawnRipple(map: maplibregl.Map, lngLat: LngLat) {
   }
 }
 
-// Quiet TS unused warning for TreeSpecies import (used implicitly via PlantId).
-export type { TreeSpecies };
