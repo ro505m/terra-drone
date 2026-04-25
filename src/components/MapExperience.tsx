@@ -4,7 +4,6 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import * as turf from "@turf/turf";
 import { gsap } from "gsap";
 import { RotateCcw, Check, AlertTriangle, Lock, Flag, Sparkles, Pencil } from "lucide-react";
-import type { MissionConfig, TreeSpecies } from "@/lib/pricing";
 import {
   PLANT_PROFILES,
   suggestPlantByLatitude,
@@ -15,12 +14,13 @@ import {
 import { spreadSeeds } from "@/lib/seedSpread";
 import provincesData from "@/data/iraq-provinces.json";
 import { MapSearch, type GeocodeResult } from "./MapSearch";
+import { useMission } from "@/lib/missionContext";
+import { IRAQI_TREES } from "@/lib/iraqiTrees";
+import { IRAQI_DRONES } from "@/lib/iraqiDrones";
+import { activeDronesList } from "@/lib/iraqPricing";
 
 interface Props {
-  config: MissionConfig;
   onAreaChange: (areaHa: number) => void;
-  onMissionRun: (running: boolean) => void;
-  onPlantChange?: (plant: PlantId) => void;
   /** Externally-controlled province lock (e.g. from a dropdown). */
   externalProvinceName?: string | null;
   /** Fires when a province gets locked (by click or external trigger). */
