@@ -1,10 +1,10 @@
 // Tree species & pricing model for the donation engine
-export type TreeSpecies = "oak" | "pine" | "palm" | "olive" | "shrub";
+export type TreeSpecies = "oak" | "acacia" | "palm" | "olive" | "shrub";
 
 export interface TreeProfile {
   id: TreeSpecies;
   label: string;
-  emoji: string;
+  icon: string;
   costPerTree: number;     // USD donation per sapling
   co2KgPerYear: number;    // CO₂ absorbed per year, kg
   color: string;           // semantic color (HSL string for canvas)
@@ -12,11 +12,11 @@ export interface TreeProfile {
 }
 
 export const TREE_PROFILES: Record<TreeSpecies, TreeProfile> = {
-  oak:   { id: "oak",   label: "Oak",   emoji: "🌳", costPerTree: 4.5, co2KgPerYear: 21, color: "hsl(142 92% 55%)", growthYears: 40 },
-  pine:  { id: "pine",  label: "Pine",  emoji: "🌲", costPerTree: 2.8, co2KgPerYear: 14, color: "hsl(160 80% 50%)", growthYears: 25 },
-  palm:  { id: "palm",  label: "Palm",  emoji: "🌴", costPerTree: 6.2, co2KgPerYear: 11, color: "hsl(75 85% 55%)",  growthYears: 30 },
-  olive: { id: "olive", label: "Olive", emoji: "🫒", costPerTree: 5.4, co2KgPerYear: 13, color: "hsl(85 55% 50%)",  growthYears: 50 },
-  shrub: { id: "shrub", label: "Shrub", emoji: "🌿", costPerTree: 1.6, co2KgPerYear: 5,  color: "hsl(100 60% 45%)", growthYears: 12 },
+  oak:   { id: "oak",   label: "Oak",   icon: "/icons/trees/albizia.png",   costPerTree: 4.5, co2KgPerYear: 21, color: "hsl(142 92% 55%)", growthYears: 40 },
+  acacia:  { id: "acacia",  label: "acacia",  icon: "/icons/trees/acacia.png",  costPerTree: 2.8, co2KgPerYear: 14, color: "hsl(160 80% 50%)", growthYears: 25 },
+  palm:  { id: "palm",  label: "Palm",  icon: "/icons/trees/date-palm.png",  costPerTree: 6.2, co2KgPerYear: 11, color: "hsl(75 85% 55%)",  growthYears: 30 },
+  olive: { id: "olive", label: "Olive", icon: "/icons/trees/olive.png", costPerTree: 5.4, co2KgPerYear: 13, color: "hsl(85 55% 50%)",  growthYears: 50 },
+  shrub: { id: "shrub", label: "Shrub", icon:  "/icons/trees/tamarisk.png", costPerTree: 1.6, co2KgPerYear: 5,  color: "hsl(100 60% 45%)", growthYears: 12 },
 };
 
 export interface MissionConfig {

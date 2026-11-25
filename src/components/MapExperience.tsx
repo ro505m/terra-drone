@@ -19,6 +19,7 @@ import { IRAQI_TREES } from "@/lib/iraqiTrees";
 import { IRAQI_DRONES } from "@/lib/iraqiDrones";
 import { activeDronesList } from "@/lib/iraqPricing";
 
+
 interface Props {
   onAreaChange: (areaHa: number) => void;
   /** Externally-controlled province lock (e.g. from a dropdown). */
@@ -51,9 +52,9 @@ const DARK_STYLE: maplibregl.StyleSpecification = {
     "carto-dark": {
       type: "raster",
       tiles: [
-        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+        `https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png?key=${import.meta.env.VITE_MAP_API_KEY}`,
+        `https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png?key=${import.meta.env.VITE_MAP_API_KEY}`,
+        `https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png?key=${import.meta.env.VITE_MAP_API_KEY}`,
       ],
       tileSize: 256,
       attribution: "© OpenStreetMap · © CARTO",
@@ -714,7 +715,7 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
     const poly = turf.polygon([ring]);
     const profile = PLANT_PROFILES[activePlantId] ?? PLANT_PROFILES.olive;
     const treeColor = activeTree?.color ?? profile.color;
-    const treeEmoji = activeTree?.emoji ?? profile.emoji;
+    const treeEmoji = activeTree?.icon ?? profile.icon;
 
     // Quantity comes from Mission Control. Cap for marker perf.
     const qty = Math.max(20, Math.min(MAX_TREE_MARKERS, mission.quantity || 200));
@@ -974,10 +975,16 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
     setHint(`Centered on ${r.short} · click "Start drawing" to outline your area`);
   };
 
-  // Plant suggestion adoption — applies to mission via tree mapping
+
   const adoptSuggestion = () => {
-    // The smart suggestion targets a PlantId; map it back to a sensible Iraqi tree.
-    // For now, just keep visual hint — actual species swap is via TreeCatalog.
+    if (!suggested) return;
+    const targetId = (Object.keys(IRAQI_TREES) as Array<keyof typeof IRAQI_TREES>).find(
+      (id) => id === suggested || IRAQI_TREES[id].plantId === suggested
+    );
+    if (targetId) {
+      mission.setTreeId(targetId);
+      setHint(`Species switched to ${PLANT_PROFILES[suggested].label} per climate suggestion`);
+    }
   };
 
   const recommendedDensity = suggested ? recommendDensity(suggested, mission.areaHa) : null;
@@ -1010,7 +1017,7 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
 
       {/* Locked-province chip */}
       {lockedProvince && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 hidden md:block">
+        <div className="absolute top-4 right-4 -translate-x-1/2 z-10 hidden md:block">
           <div className="glass-subtle px-3 py-1.5 rounded-full text-[11px] flex items-center gap-2 font-mono">
             <Lock className="h-3 w-3 text-primary" />
             <span className="text-muted-foreground uppercase tracking-wider">Locked</span>
@@ -1056,7 +1063,8 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
               <p className="text-[10px] uppercase tracking-[0.2em] text-primary/80 font-mono">Smart suggestion</p>
             </div>
             <div className="mt-2 flex items-center gap-3">
-              <span className="text-2xl leading-none">{PLANT_PROFILES[suggested].emoji}</span>
+              {/* <span className="text-2xl leading-none">{PLANT_PROFILES[suggested].emoji}</span> */}
+              <img className="text-2xl leading-none" src={PLANT_PROFILES[suggested].icon} alt={PLANT_PROFILES[suggested].id}/>
               <div className="flex-1 min-w-0">
                 <p className="font-display text-base leading-tight">{PLANT_PROFILES[suggested].label}</p>
                 <p className="text-[10px] text-muted-foreground leading-snug truncate">
@@ -1139,7 +1147,7 @@ export const MapExperience = ({ onAreaChange, externalProvinceName, onProvinceLo
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-muted-foreground">Plant</span>
                   <span className="text-foreground/90 inline-flex items-center gap-1.5">
-                    <span>{activeProfile.emoji}</span>
+                    <img src={activeProfile.icon}/>
                     <span className="font-mono">{activeProfile.label}</span>
                   </span>
                 </div>
@@ -1290,10 +1298,10 @@ function applyPolyColors(map: maplibregl.Map, outer: string, inner: string, outl
 }
 
 function makeTreeEl(color: string, emoji: string): HTMLDivElement {
-  const el = document.createElement("div");
+  const el = document.createElement("img");
   el.className = "arbor-tree";
   el.style.setProperty("--c", color);
-  el.textContent = emoji;
+  el.src = emoji;
   return el;
 }
 
@@ -1309,7 +1317,10 @@ function spawnRipple(map: maplibregl.Map, lngLat: LngLat) {
   for (let i = 0; i < 2; i++) {
     const el = document.createElement("div");
     el.className = "arbor-ripple";
-    const m = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(lngLat).addTo(map);
+    const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+      .setLngLat(lngLat)
+      .addTo(map);
+
     gsap.fromTo(
       el,
       { scale: 0.3, opacity: 0.9 },
@@ -1319,9 +1330,8 @@ function spawnRipple(map: maplibregl.Map, lngLat: LngLat) {
         duration: 1.4,
         delay: i * 0.18,
         ease: "expo.out",
-        onComplete: () => m.remove(),
+        onComplete: () => marker.remove(),
       }
     );
   }
 }
-

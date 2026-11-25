@@ -120,12 +120,18 @@ export const TreeCatalog = ({ provinceName, centroidLat, activeId, onSelect, cla
               aria-pressed={isActive}
             >
               <div className="flex items-start gap-3">
-                <span
+                {/* <span
                   className="text-2xl leading-none mt-0.5 shrink-0"
                   style={{ filter: `drop-shadow(0 0 8px ${tree.color})` }}
                 >
                   {tree.emoji}
-                </span>
+                </span> */}
+                <img
+                  src={tree.icon}
+                  alt={pick(tree.name)}
+                  className="text-2xl leading-none mt-0.5 shrink-0"
+                  style={{ filter: `drop-shadow(0 0 8px ${tree.color})` }}
+                />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-display text-base leading-tight">

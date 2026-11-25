@@ -30,7 +30,7 @@ export interface IraqiTree {
   plantId: PlantId;
   name: { en: string; ar: string };
   scientific: string;
-  emoji: string;
+  icon: string;
   /** Tailwind/CSS HSL color used for catalog chips & marker tint. */
   color: string;
 
@@ -64,7 +64,7 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
     plantId: "palm",
     name: { en: "Date Palm", ar: "نخيل التمر" },
     scientific: "Phoenix dactylifera",
-    emoji: "🌴",
+    icon: "/icons/trees/date-palm.png",
     color: "hsl(75 85% 55%)",
     tempRange: [-5, 55],
     droughtResistance: 5,
@@ -87,7 +87,7 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
     plantId: "olive",
     name: { en: "Sidr (Christ's Thorn)", ar: "السدر" },
     scientific: "Ziziphus spina-christi",
-    emoji: "🌳",
+    icon: "/icons/trees/sidr.png",
     color: "hsl(95 55% 45%)",
     tempRange: [-2, 50],
     droughtResistance: 5,
@@ -110,7 +110,7 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
     plantId: "olive",
     name: { en: "Eucalyptus", ar: "الكينا" },
     scientific: "Eucalyptus camaldulensis",
-    emoji: "🌲",
+    icon: "/icons/trees/eucalyptus.png",
     color: "hsl(160 55% 50%)",
     tempRange: [-3, 48],
     droughtResistance: 4,
@@ -133,7 +133,7 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
     plantId: "olive",
     name: { en: "Conocarpus", ar: "الكونوكاربس" },
     scientific: "Conocarpus erectus",
-    emoji: "🌿",
+    icon: "/icons/trees/conocarpus.png",
     color: "hsl(140 50% 45%)",
     tempRange: [0, 52],
     droughtResistance: 5,
@@ -156,7 +156,7 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
     plantId: "oak",
     name: { en: "Albizia (Lebbeck)", ar: "الألبيزيا (الدِّفلة الحريرية)" },
     scientific: "Albizia lebbeck",
-    emoji: "🌳",
+    icon: "/icons/trees/albizia.png",
     color: "hsl(110 60% 55%)",
     tempRange: [-2, 47],
     droughtResistance: 4,
@@ -179,7 +179,7 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
     plantId: "olive",
     name: { en: "Neem", ar: "النيم" },
     scientific: "Azadirachta indica",
-    emoji: "🌳",
+    icon: "/icons/trees/neem.png",
     color: "hsl(130 65% 50%)",
     tempRange: [4, 50],
     droughtResistance: 5,
@@ -199,10 +199,10 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
   },
   acacia: {
     id: "acacia",
-    plantId: "shrub",
+    plantId: "acacia",
     name: { en: "Acacia", ar: "السنط (الأكاسيا)" },
     scientific: "Acacia tortilis / nilotica",
-    emoji: "🌿",
+    icon: "/icons/trees/acacia.png",
     color: "hsl(85 60% 50%)",
     tempRange: [-2, 50],
     droughtResistance: 5,
@@ -225,7 +225,7 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
     plantId: "olive",
     name: { en: "Olive", ar: "الزيتون" },
     scientific: "Olea europaea",
-    emoji: "🫒",
+    icon: "/icons/trees/olive.png",
     color: "hsl(85 55% 50%)",
     tempRange: [-5, 45],
     droughtResistance: 4,
@@ -248,7 +248,7 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
     plantId: "shrub",
     name: { en: "Tamarisk (Athl)", ar: "الأثل (الطرفاء)" },
     scientific: "Tamarix aphylla",
-    emoji: "🌿",
+    icon: "/icons/trees/tamarisk.png",
     color: "hsl(105 50% 45%)",
     tempRange: [-5, 50],
     droughtResistance: 5,
@@ -271,7 +271,7 @@ export const IRAQI_TREES: Record<IraqiTreeId, IraqiTree> = {
     plantId: "olive",
     name: { en: "Pomegranate", ar: "الرمان" },
     scientific: "Punica granatum",
-    emoji: "🌳",
+    icon: "/icons/trees/pomegranate.png",
     color: "hsl(0 60% 55%)",
     tempRange: [-10, 45],
     droughtResistance: 4,

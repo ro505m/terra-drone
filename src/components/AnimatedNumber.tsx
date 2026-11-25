@@ -10,7 +10,6 @@ interface Props {
   className?: string;
 }
 
-/** GSAP-animated number — tweens between values smoothly. */
 export const AnimatedNumber = ({
   value,
   prefix = "",

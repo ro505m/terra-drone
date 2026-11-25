@@ -247,9 +247,15 @@ const ActiveTreePreview = ({ id }: { id: IraqiTreeId }) => {
   return (
     <>
       <div className="flex items-start gap-4">
-        <span className="text-6xl leading-none" style={{ filter: `drop-shadow(0 0 24px ${tree.color})` }}>
+        {/* <span className="text-6xl leading-none" style={{ filter: `drop-shadow(0 0 24px ${tree.color})` }}>
           {tree.emoji}
-        </span>
+        </span> */}
+        <img
+              src={tree.icon}
+              alt={pick(tree.name)}
+              className="text-2xl leading-none mt-0.5 shrink-0"
+              style={{ filter: `drop-shadow(0 0 8px ${tree.color})` }}
+        />
         <div className="flex-1 min-w-0">
           <h3 className="font-display text-3xl leading-tight">{pick(tree.name)}</h3>
           <p className="text-sm text-muted-foreground italic mt-0.5">{tree.scientific}</p>

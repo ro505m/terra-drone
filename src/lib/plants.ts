@@ -9,7 +9,7 @@ export type PlantId = TreeSpecies; // we reuse the same identifiers
 export interface PlantProfile {
   id: PlantId;
   label: string;
-  emoji: string;
+  icon: string;
   /** Heat / drought resistance, 0..1 */
   heatResistance: number;
   /** Suggested trees per hectare */
@@ -37,7 +37,7 @@ export const PLANT_PROFILES: Record<PlantId, PlantProfile> = {
   palm: {
     id: "palm",
     label: "Palm",
-    emoji: "🌴",
+    icon: "/icons/trees/date-palm.png",
     heatResistance: 0.95,
     baseDensity: 180,
     clusterRadius: 60,
@@ -50,7 +50,7 @@ export const PLANT_PROFILES: Record<PlantId, PlantProfile> = {
   shrub: {
     id: "shrub",
     label: "Desert shrub",
-    emoji: "🌿",
+    icon: "/icons/trees/tamarisk.png",
     heatResistance: 1.0,
     baseDensity: 1400,
     clusterRadius: 35,
@@ -63,7 +63,7 @@ export const PLANT_PROFILES: Record<PlantId, PlantProfile> = {
   olive: {
     id: "olive",
     label: "Olive",
-    emoji: "🫒",
+    icon: "/icons/trees/olive.png",
     heatResistance: 0.75,
     baseDensity: 280,
     clusterRadius: 80,
@@ -76,7 +76,7 @@ export const PLANT_PROFILES: Record<PlantId, PlantProfile> = {
   oak: {
     id: "oak",
     label: "Oak",
-    emoji: "🌳",
+    icon: "/icons/trees/albizia.png",
     heatResistance: 0.45,
     baseDensity: 420,
     clusterRadius: 95,
@@ -86,10 +86,10 @@ export const PLANT_PROFILES: Record<PlantId, PlantProfile> = {
     growth: { duration: 1.3, ease: "elastic.out(1, 0.6)", rotationJitter: 10, scaleFrom: 0 },
     climateFit: "Cooler, well-watered northern zones",
   },
-  pine: {
-    id: "pine",
-    label: "Pine",
-    emoji: "🌲",
+  acacia: {
+    id: "acacia",
+    label: "acacia",
+    icon: "/icons/trees/acacia.png",
     heatResistance: 0.5,
     baseDensity: 600,
     clusterRadius: 70,
@@ -101,7 +101,7 @@ export const PLANT_PROFILES: Record<PlantId, PlantProfile> = {
   },
 };
 
-export const PLANT_ORDER: PlantId[] = ["palm", "shrub", "olive", "olive" === "olive" ? "oak" : "oak", "pine"]
+export const PLANT_ORDER: PlantId[] = ["palm", "shrub", "olive", "acacia"]
   .filter((v, i, a) => a.indexOf(v) === i) as PlantId[];
 
 /**
@@ -114,7 +114,7 @@ export function suggestPlantByLatitude(lat: number): PlantId {
   if (lat < 33.5) return "shrub";  // central arid
   if (lat < 35.0) return "olive";  // mid-north Mesopotamian basin
   if (lat < 36.2) return "oak";    // northern foothills
-  return "pine";                    // mountainous Kurdistan
+  return "acacia";                    // mountainous Kurdistan
 }
 
 /**

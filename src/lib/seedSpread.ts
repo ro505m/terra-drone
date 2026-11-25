@@ -9,7 +9,7 @@ type LngLat = [number, number];
 
 // Deterministic 2D value noise (mulberry32-ish hash).
 function hash(x: number, y: number, seed: number): number {
-  let h = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453;
+  const  h = Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453;
   return h - Math.floor(h);
 }
 

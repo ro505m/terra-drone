@@ -10,7 +10,7 @@ export interface IraqiDrone {
   role: DroneRole;
   /** One-line tagline. */
   tagline: { en: string; ar: string };
-  emoji: string;
+  icon: string;
   /** Tailwind/CSS HSL color used for marker tint and propeller glow. */
   color: string;
 
@@ -44,7 +44,7 @@ export const IRAQI_DRONES: Record<string, IraqiDrone> = {
       en: "Heavy-lift octocopter for broadcast seeding.",
       ar: "ثماني المراوح لرش البذور على نطاق واسع.",
     },
-    emoji: "🛰️",
+    icon: "/icons/drones/agras-t40.svg",
     color: "hsl(142 92% 55%)",
     speedMps: 7,
     capacity: 50,
@@ -67,7 +67,7 @@ export const IRAQI_DRONES: Record<string, IraqiDrone> = {
       en: "Precision water & nutrient spraying for saplings.",
       ar: "رش دقيق للماء والمغذيات للشتلات الصغيرة.",
     },
-    emoji: "💧",
+    icon: "/icons/drones/agras-t30.svg",
     color: "hsl(180 80% 60%)",
     speedMps: 6,
     capacity: 30,
@@ -90,7 +90,7 @@ export const IRAQI_DRONES: Record<string, IraqiDrone> = {
       en: "Mid-size hex for native seed pods.",
       ar: "سداسي متوسط الحجم لكبسولات البذور المحلية.",
     },
-    emoji: "🌱",
+    icon: "/icons/drones/hexa-seeder.svg",
     color: "hsl(95 70% 55%)",
     speedMps: 8,
     capacity: 18,
@@ -113,7 +113,7 @@ export const IRAQI_DRONES: Record<string, IraqiDrone> = {
       en: "Lightweight survey & multispectral mapping.",
       ar: "مسح جوي خفيف وتصوير متعدد الأطياف.",
     },
-    emoji: "🛩️",
+    icon: "/icons/drones/scout.svg",
     color: "hsl(45 95% 60%)",
     speedMps: 14,
     capacity: 0,
@@ -136,7 +136,7 @@ export const IRAQI_DRONES: Record<string, IraqiDrone> = {
       en: "Local-built quad: seed + light spray.",
       ar: "رباعي محلي الصنع: بذار ورش خفيف.",
     },
-    emoji: "🛸",
+    icon: "/icons/drones/hybrid.svg",
     color: "hsl(28 90% 60%)",
     speedMps: 5,
     capacity: 8,

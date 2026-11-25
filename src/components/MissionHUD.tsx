@@ -93,12 +93,18 @@ export const MissionHUD = ({ className }: Props) => {
           </a>
         </div>
         <div className="flex items-center gap-3">
-          <span
+          {/* <span
             className="text-3xl leading-none"
             style={{ filter: `drop-shadow(0 0 12px ${tree.color})` }}
           >
             {tree.emoji}
-          </span>
+          </span> */}
+          <img
+              src={tree.icon}
+              alt={pick(tree.name)}
+              className="text-2xl leading-none mt-0.5 shrink-0"
+              style={{ filter: `drop-shadow(0 0 8px ${tree.color})` }}
+            />
           <div className="flex-1 min-w-0">
             <p className="font-display text-base leading-tight truncate">{pick(tree.name)}</p>
             <p className="text-[11px] text-muted-foreground italic truncate">{tree.scientific}</p>
